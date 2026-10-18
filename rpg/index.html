@@ -29,12 +29,15 @@
                     <div class="hud-chip" id="hud-time" title="Day and time">Day 1 · Morning</div>
                     <div class="hud-gold" title="Gold coins"><span class="coin"></span><b id="hud-gold">20</b></div>
                     <div class="hud-gold" title="Knowledge for research"><span class="leaf"></span><b id="hud-know">0</b></div>
+                    <div class="hud-gold" title="Grain in the granary"><span class="grain"></span><b id="hud-grain">0</b></div>
+                    <button id="ride-btn" class="ghost" hidden>Ride</button>
                     <button id="menu-btn" class="ghost">Menu</button>
                 </div>
             </div>
 
             <div class="quest" id="quest"></div>
             <div class="banner" id="banner" hidden></div>
+            <div class="fade" id="fade" hidden></div>
             <div class="toast" id="toast" hidden></div>
 
             <div class="dpad" id="dpad" aria-label="Movement controls">
@@ -47,6 +50,7 @@
             <div class="dialog" id="dialog" hidden>
                 <div class="dialog-name" id="dialog-name"></div>
                 <p class="dialog-text" id="dialog-text"></p>
+                <div class="dialog-choices" id="dialog-choices"></div>
                 <button class="dialog-next" id="dialog-next">Continue ▸</button>
             </div>
 
@@ -85,10 +89,15 @@
             </div>
         </section>
 
-        <p class="controls">Move with the arrow keys or WASD. Walk into people to talk and into enemies to fight. Space or Enter continues a conversation. Press M for the Durbar: your squad, research and empire.</p>
+        <p class="controls">Move with the arrow keys or WASD. Walk into people to talk and into enemies to fight. Space or Enter continues a conversation. Press M for the Durbar (squad, research, farming, government and travel) and R to ride your horse.</p>
     </main>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="game.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.149.0/build/three.min.js"></script>
+    <script src="js/core.js"></script>
+    <script src="js/empire.js"></script>
+    <script src="js/models3d.js"></script>
+    <script src="js/world3d.js"></script>
+    <script src="js/play.js"></script>
+    <script src="js/main.js"></script>
 </body>
 </html>

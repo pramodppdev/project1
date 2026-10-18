@@ -18,6 +18,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 
 body {
     margin: 0;
@@ -111,6 +112,7 @@ canvas { display: block; width: 100%; height: 100%; }
     font-size: 0.85rem;
     white-space: nowrap;
 }
+.grain { width: 12px; height: 12px; border-radius: 50% 50% 45% 45%; background: radial-gradient(circle at 40% 35%, #f3dc8a, #b8902e); display: inline-block; }
 .leaf { width: 14px; height: 9px; border-radius: 2px; background: linear-gradient(#efdcaa, #c9ad6e); box-shadow: inset 2px 0 0 #6b4423, inset -2px 0 0 #6b4423; display: inline-block; }
 .hud-gold {
     display: flex; align-items: center; gap: 6px;
@@ -225,6 +227,10 @@ canvas { display: block; width: 100%; height: 100%; }
 .dialog-name { font-family: var(--display); color: var(--saffron); font-size: 1.15rem; line-height: 1; }
 .dialog-text { margin: 0; max-width: 68ch; min-height: 3em; }
 .dialog-next { justify-self: end; }
+.dialog-choices { display: flex; flex-wrap: wrap; gap: 8px; }
+.dialog-choices:empty { display: none; }
+.dialog-choices button { flex: 1 1 220px; text-align: left; padding: 9px 12px; }
+.dialog-choices button:hover:not(:disabled) { border-color: var(--saffron); }
 
 /* Sheets */
 .sheet {
@@ -346,6 +352,18 @@ canvas { display: block; width: 100%; height: 100%; }
 .stat b { font-variant-numeric: tabular-nums; font-size: 1.05rem; }
 .menu-foot { margin-top: 20px; display: flex; gap: 8px; flex-wrap: wrap; }
 
+.fade { position: absolute; inset: 0; background: #000; opacity: 0; transition: opacity 0.45s ease; z-index: 8; pointer-events: none; }
+.fade.on { opacity: 1; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 4px; }
+.chip { padding: 5px 12px; border-radius: 999px; font-size: 0.85rem; }
+.chip[aria-pressed="true"] { background: var(--saffron); border-color: var(--saffron); color: var(--ink); font-weight: 600; }
+.crop-now { margin: 6px 0; font-size: 0.92rem; }
+.mini-meter.mood { max-width: 300px; }
+.mini-meter.mood span { background: #d9a43a; }
+.mini-meter.mood.good span { background: #6cbf6a; }
+.mini-meter.mood.bad span { background: var(--vermilion); }
+.notice { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 10px 12px; margin-top: 12px; border-radius: 10px; border: 1px solid var(--saffron); background: color-mix(in srgb, var(--saffron) 14%, var(--panel)); max-width: 640px; }
+.notice span { flex: 1 1 240px; color: var(--muted); }
 .tabs { display: flex; gap: 6px; margin: 12px 0 4px; flex-wrap: wrap; }
 .tabs button { padding: 6px 14px; border-radius: 999px; }
 .tabs button[aria-selected="true"] { background: var(--saffron); border-color: var(--saffron); color: var(--ink); font-weight: 600; }
