@@ -3,9 +3,62 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Document</title>
+    <title>Empire Builder</title>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
-	<h3>sucessfully updated in git front</h3>
+    <header class="topbar">
+        <h1>Empire Builder</h1>
+        <div class="turn">Turn <strong id="turn">1</strong></div>
+        <div class="top-actions">
+            <button id="new-game" class="secondary">New game</button>
+            <button id="end-turn" class="primary">End turn ▸</button>
+        </div>
+    </header>
+
+    <main class="layout">
+        <section class="map-wrap">
+            <div id="map" class="map" aria-label="Game map"></div>
+            <ul class="legend">
+                <li><span class="swatch plains"></span>Plains</li>
+                <li><span class="swatch forest"></span>Forest</li>
+                <li><span class="swatch hills"></span>Hills</li>
+                <li><span class="swatch mountain"></span>Mountains</li>
+                <li><span class="swatch water"></span>Water</li>
+                <li><span class="swatch own-player"></span>Your empire</li>
+                <li><span class="swatch own-rival"></span>Crimson Horde</li>
+            </ul>
+        </section>
+
+        <aside class="side">
+            <section class="panel" id="resources"></section>
+            <section class="panel" id="tile-panel"></section>
+            <section class="panel log-panel">
+                <h2>Chronicle</h2>
+                <ol id="log"></ol>
+            </section>
+            <details class="panel help">
+                <summary>How to play</summary>
+                <ul>
+                    <li>Click a tile to inspect it. Tiles with a dashed outline border your land and can be <strong>claimed</strong> for gold.</li>
+                    <li><strong>Build</strong> on your empty tiles. Each terrain allows different buildings: farms on plains, lumber camps in forests, quarries on hills, gold mines in the mountains.</li>
+                    <li>Every production building needs one worker. If you have fewer people than buildings, output drops.</li>
+                    <li>People eat food and pay taxes. With spare food and housing your population grows each turn. Build <strong>houses</strong> to raise the cap.</li>
+                    <li>Build <strong>barracks</strong> to train soldiers. Soldiers defend all your land and can attack neighbouring enemy tiles, one attack per turn.</li>
+                    <li>Capture the Crimson Horde's capital 🏰 to win. Lose your own and the game is over.</li>
+                </ul>
+            </details>
+        </aside>
+    </main>
+
+    <div id="overlay" class="overlay" hidden>
+        <div class="modal">
+            <h2 id="overlay-title"></h2>
+            <p id="overlay-text"></p>
+            <button id="play-again" class="primary">Play again</button>
+        </div>
+    </div>
+
+    <script src="game.js"></script>
 </body>
 </html>
