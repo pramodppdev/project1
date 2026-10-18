@@ -21,11 +21,14 @@
             <div class="hud">
                 <div class="hud-hero">
                     <div class="hud-name">Veer <span id="hud-level">Lv 1</span></div>
+                    <div class="hud-rank" id="hud-rank">Squad Leader · Nayak</div>
                     <div class="meter hp" title="Health"><span id="hud-hp-bar"></span><em id="hud-hp">40 / 40</em></div>
                     <div class="meter prana" title="Prana (spiritual energy for skills)"><span id="hud-prana-bar"></span><em id="hud-prana">12 / 12</em></div>
                 </div>
                 <div class="hud-side">
+                    <div class="hud-chip" id="hud-time" title="Day and time">Day 1 · Morning</div>
                     <div class="hud-gold" title="Gold coins"><span class="coin"></span><b id="hud-gold">20</b></div>
+                    <div class="hud-gold" title="Knowledge for research"><span class="leaf"></span><b id="hud-know">0</b></div>
                     <button id="menu-btn" class="ghost">Menu</button>
                 </div>
             </div>
@@ -69,20 +72,20 @@
 
             <div class="sheet panel" id="menu" hidden>
                 <div class="panel-head">
-                    <h2>Veer's Satchel</h2>
+                    <h2>Durbar</h2>
                     <button class="ghost" data-close="menu">Close</button>
                 </div>
                 <div id="menu-body"></div>
             </div>
 
             <div class="sheet ending" id="ending" hidden>
-                <h2>The land is at peace</h2>
+                <h2 id="ending-title">The land is at peace</h2>
                 <p id="ending-text"></p>
                 <button class="primary" id="ending-close">Keep exploring</button>
             </div>
         </section>
 
-        <p class="controls">Move with the arrow keys or WASD. Walk into people to talk and into enemies to fight. Space or Enter continues a conversation.</p>
+        <p class="controls">Move with the arrow keys or WASD. Walk into people to talk and into enemies to fight. Space or Enter continues a conversation. Press M for the Durbar: your squad, research and empire.</p>
     </main>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>

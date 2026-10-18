@@ -28,9 +28,9 @@ const ENEMIES = {
     raider: { name: 'Desert Raider', icon: '🏇🏽', hp: 75, atk: 21, def: 7, xp: 48, gold: 30 },
     leopard: { name: 'Snow Leopard', icon: '🐆', hp: 95, atk: 27, def: 10, xp: 70, gold: 12 },
     scout: { name: 'Rakshasa Scout', icon: '👺', hp: 120, atk: 29, def: 11, xp: 90, gold: 35 },
-    sardar: { name: 'Sardar Dhurandhar Singh', icon: '🧔🏽', hp: 140, atk: 17, def: 6, xp: 120, gold: 100, boss: 'sardarDefeated' },
-    queen: { name: 'The Scorpion Queen', icon: '🦂', hp: 260, atk: 26, def: 10, xp: 300, gold: 200, boss: 'queenDefeated' },
-    kaal: { name: 'Rakshasa Kaal', icon: '👹', hp: 360, atk: 34, def: 14, xp: 0, gold: 0, boss: 'kaalDefeated' },
+    sardar: { name: 'Sardar Dhurandhar Singh', icon: '🧔🏽', hp: 200, atk: 18, def: 6, xp: 120, gold: 100, boss: 'sardarDefeated' },
+    queen: { name: 'The Scorpion Queen', icon: '🦂', hp: 440, atk: 27, def: 10, xp: 300, gold: 200, boss: 'queenDefeated' },
+    kaal: { name: 'Rakshasa Kaal', icon: '👹', hp: 760, atk: 35, def: 14, xp: 0, gold: 0, boss: 'kaalDefeated' },
 };
 
 const ITEMS = {
@@ -55,7 +55,8 @@ const SHOPS = {
 
 const SKILLS = {
     vajra: { name: 'Vajra Strike', cost: 5, desc: 'A thunderous blow, 1.8x damage' },
-    pranayama: { name: 'Pranayama', cost: 6, desc: 'Breathe deep and heal 40% health' },
+    pranayama: { name: 'Pranayama', cost: 6, desc: 'Breathe deep and heal your wounds' },
+    rockets: { name: 'Rocket Barrage', cost: 8, desc: 'Iron-cased rockets, 2.5x damage that ignores armour' },
 };
 
 const NPCS = [
@@ -66,6 +67,8 @@ const NPCS = [
     { id: 'guru', x: 12, y: 10, icon: '🧘🏽', name: 'Guru Anand' },
     { id: 'rani', x: 33, y: 26, icon: '👸🏽', name: 'Rani Devika' },
     { id: 'trader', x: 31, y: 24, icon: '🧕🏽', name: 'Farida the Trader' },
+    { id: 'havaldar', x: 12, y: 20, icon: '💂🏽', name: 'Havaldar Bhim' },
+    { id: 'captain', x: 35, y: 24, icon: '💂🏽', name: 'Senapati Arjan' },
 ];
 
 const BOSSES = [
@@ -74,6 +77,238 @@ const BOSSES = [
     { kind: 'kaal', x: 41, y: 4 },
 ];
 
+// ---------- Empire: ranks, squad, research, provinces, time ----------
+
+const DAY_SECONDS = 180;
+
+const RANKS = [
+    { title: 'Squad Leader', local: 'Nayak', renown: 0, squad: 2 },
+    { title: 'Captain', local: 'Senanayak', renown: 40, squad: 3 },
+    { title: 'Commander', local: 'Dalapati', renown: 120, squad: 4 },
+    { title: 'General', local: 'Senapati', renown: 280, squad: 5, needs: 'sardarDefeated' },
+    { title: 'Governor', local: 'Subedar', renown: 500, squad: 6, needs: 'sardarDefeated' },
+    { title: 'King', local: 'Raja', renown: 800, squad: 7, needs: 'queenDefeated' },
+    { title: 'Emperor', local: 'Samrat', renown: 1200, squad: 8, needs: 'kaalDefeated' },
+];
+
+const UNITS = {
+    paidal: { name: 'Paidal', role: 'Foot soldier with spear and shield', hp: 40, atk: 5, cost: 25, wage: 2 },
+    archer: { name: 'Dhanurdhar', role: 'Archer with a bamboo longbow', hp: 30, atk: 8, cost: 40, wage: 3, research: 'dhanurveda' },
+    cavalry: { name: 'Ashvarohi', role: 'Mounted lancer', hp: 65, atk: 11, cost: 70, wage: 5, research: 'ashva' },
+    elephant: { name: 'Gajasena', role: 'Armoured war elephant', hp: 170, atk: 19, cost: 180, wage: 10, research: 'gaja', rank: 3 },
+};
+
+const RESEARCH = {
+    ayurveda: { tier: 1, cost: 20, name: 'Ayurveda', source: 'Charaka Samhita', effect: 'Food heals 50% more, and the Vaidya also heals your squad.' },
+    ganita: { tier: 1, cost: 25, name: 'Ganita: zero and decimals', source: 'Brahmagupta, 628 CE', effect: '+25% gold from battles and taxes.' },
+    dhanurveda: { tier: 1, cost: 25, name: 'Dhanurveda', source: 'The science of archery', effect: 'Recruit Dhanurdhar archers.' },
+    wootz: { tier: 2, cost: 45, req: ['ganita'], name: 'Wootz steel', source: 'South Indian crucible steel', effect: '+4 attack for you and +30% squad damage.' },
+    yoga: { tier: 2, cost: 40, req: ['ayurveda'], name: 'Yoga Sutras', source: 'Patanjali', effect: '+10 maximum prana, and Pranayama heals 60%.' },
+    ashva: { tier: 2, cost: 45, req: ['dhanurveda'], name: 'Ashva Shastra', source: 'Horse breeding and cavalry', effect: 'Recruit Ashvarohi cavalry.' },
+    stepwell: { tier: 2, cost: 40, req: ['ganita'], name: 'Stepwell engineering', source: 'Rani ki Vav, 11th century', effect: 'Provinces pay 50% more tax.' },
+    iron: { tier: 3, cost: 80, req: ['wootz'], name: 'Rust-free iron', source: 'The Iron Pillar of Delhi', effect: '+4 defense for you and +40% squad health.' },
+    surgery: { tier: 3, cost: 70, req: ['yoga'], name: "Sushruta's surgery", source: 'Sushruta Samhita', effect: 'Fallen soldiers have a 60% chance to survive their wounds.' },
+    gaja: { tier: 3, cost: 90, req: ['ashva'], name: 'Gaja Shastra', source: 'Training war elephants', effect: 'Recruit Gajasena war elephants (needs rank General).' },
+    jyotisha: { tier: 3, cost: 70, req: ['stepwell'], name: 'Jyotisha: astronomy', source: 'Aryabhata, 499 CE', effect: 'Vidyalayas produce double knowledge, and night battles lose their danger.' },
+    rockets: { tier: 4, cost: 140, req: ['iron', 'jyotisha'], name: 'Mysorean rockets', source: 'Hyder Ali and Tipu Sultan, 1780s', effect: 'New skill: Rocket Barrage.' },
+    nalanda: { tier: 4, cost: 120, req: ['jyotisha', 'surgery'], name: 'Nalanda Mahavihara', source: 'Great university, 5th century CE', effect: '+2 squad size and +10% renown.' },
+};
+
+const PROVINCES = {
+    rampur: { name: 'Rampur', tax: 6 },
+    dandak: { name: 'Dandak Forest', tax: 8, unlock: 'sardarDefeated', how: 'Defeat Sardar Dhurandhar Singh' },
+    thar: { name: 'Thar Desert', tax: 12, unlock: 'queenDefeated', how: 'Destroy the Scorpion Queen' },
+    himalaya: { name: 'Himalayan Pass', tax: 15, unlock: 'kaalDefeated', how: 'Defeat Rakshasa Kaal' },
+};
+
+const BUILDINGS = {
+    market: { name: 'Haat', kind: 'Market', desc: '+8 gold a day per level', cost: [40, 90, 160] },
+    vidyalaya: { name: 'Vidyalaya', kind: 'School', desc: '+3 knowledge a day per level', cost: [50, 110, 200] },
+    barracks: { name: 'Chhavni', kind: 'Barracks', desc: '+1 squad size here, faster healing and cheaper recruits', cost: [60, 130, 220] },
+};
+
+const SCROLLS = [
+    { id: 'charaka', near: [13, 28], title: 'The Charaka Samhita', fact: 'This founding text of Ayurveda teaches that food, sleep and a disciplined life are the three pillars of good health.' },
+    { id: 'panini', near: [2, 15], title: "Panini's grammar", fact: 'More than 2,000 years ago Panini wrote the Ashtadhyayi, a grammar of Sanskrit with nearly 4,000 precise rules.' },
+    { id: 'chintz', near: [14, 15], title: 'Indian cotton', fact: 'Indian cotton printed with fast natural dyes such as indigo was traded across the world. The English word "chintz" comes from the Hindi word chheent.' },
+    { id: 'sushruta', near: [3, 8], title: "Sushruta's surgery", fact: 'The Sushruta Samhita describes more than a hundred surgical instruments and a method for rebuilding a damaged nose.' },
+    { id: 'wootz', near: [12, 3], title: 'Wootz steel', fact: 'Wootz steel was made in small clay crucibles in South India. Traders carried it west, where smiths forged it into famous Damascus blades.' },
+    { id: 'zero', near: [14, 12], title: 'Brahmagupta and zero', fact: 'In 628 CE Brahmagupta wrote the first known rules for calculating with zero, such as "a number minus itself is zero".' },
+    { id: 'stepwell', near: [35, 27], title: 'Rani ki Vav', fact: 'Rani ki Vav in Patan, Gujarat, is an 11th-century stepwell seven storeys deep, carved with hundreds of sculptures.' },
+    { id: 'pillar', near: [22, 28], title: 'The Iron Pillar', fact: 'The Iron Pillar of Delhi has stood for about 1,600 years with very little rust, thanks to the phosphorus in its iron.' },
+    { id: 'rockets', near: [45, 18], title: 'Mysorean rockets', fact: 'Hyder Ali and Tipu Sultan of Mysore fought with iron-cased rockets in the 1780s and 1790s. The British studied them to build their own Congreve rockets.' },
+    { id: 'jantar', near: [20, 3], title: 'Jantar Mantar', fact: 'The Samrat Yantra at Jaipur\'s Jantar Mantar, built by Sawai Jai Singh II in the 1700s, is a giant stone sundial that tells local time to within about two seconds.' },
+    { id: 'aryabhata', near: [28, 9], title: 'Aryabhata', fact: 'In 499 CE Aryabhata wrote the Aryabhatiya. He gave pi as about 3.1416 and taught that the Earth spins on its axis.' },
+    { id: 'nalanda', near: [45, 10], title: 'Nalanda', fact: 'Nalanda in Bihar was one of the world\'s first great residential universities. Scholars travelled from China, Korea and Tibet to study there.' },
+];
+
+let pendingCoronation = false;
+let trail = [];
+
+const hasResearch = k => player.research.includes(k);
+
+function unlockedProvinces() {
+    return Object.keys(PROVINCES).filter(k => !PROVINCES[k].unlock || flags[PROVINCES[k].unlock]);
+}
+
+function bestBarracks() {
+    return Math.max(0, ...unlockedProvinces().map(k => player.provinces[k].barracks));
+}
+
+function squadCap() {
+    const barracks = unlockedProvinces().filter(k => player.provinces[k].barracks > 0).length;
+    return RANKS[player.rank].squad + (hasResearch('nalanda') ? 2 : 0) + barracks;
+}
+
+function unitMaxHp(type) {
+    return Math.round(UNITS[type].hp * (hasResearch('iron') ? 1.4 : 1));
+}
+
+function squadMult() {
+    return 1 + 0.08 * player.rank + (hasResearch('wootz') ? 0.3 : 0);
+}
+
+function goldMult() {
+    return hasResearch('ganita') ? 1.25 : 1;
+}
+
+function gainRenown(n) {
+    player.renown += Math.round(n * (hasResearch('nalanda') ? 1.1 : 1));
+    checkRank();
+}
+
+function checkRank() {
+    let r = player.rank;
+    while (r + 1 < RANKS.length) {
+        const next = RANKS[r + 1];
+        if (player.renown >= next.renown && (!next.needs || flags[next.needs])) r++;
+        else break;
+    }
+    if (r <= player.rank) return;
+    player.rank = r;
+    const rk = RANKS[r];
+    showBanner(`${rk.title} · ${rk.local}`);
+    toast(`Promoted to ${rk.title}! You can now lead ${squadCap()} soldiers.`);
+    if (r === RANKS.length - 1) pendingCoronation = true;
+}
+
+function dayPhase() {
+    const t = player.time;
+    const label = t < 0.2 ? 'Night' : t < 0.3 ? 'Dawn' : t < 0.45 ? 'Morning' : t < 0.55 ? 'Noon'
+        : t < 0.7 ? 'Afternoon' : t < 0.8 ? 'Dusk' : 'Night';
+    return { label, night: t < 0.22 || t > 0.78 };
+}
+
+function dailyYield() {
+    let gold = 0;
+    let know = 0;
+    for (const k of unlockedProvinces()) {
+        const p = player.provinces[k];
+        gold += PROVINCES[k].tax * (hasResearch('stepwell') ? 1.5 : 1) + 8 * p.market;
+        know += 1 + 3 * p.vidyalaya * (hasResearch('jyotisha') ? 2 : 1);
+    }
+    gold *= goldMult() * (player.rank >= 5 ? 1.25 : 1) * (player.weather === 'rain' ? 1.2 : 1);
+    const wages = player.squad.reduce((a, s) => a + UNITS[s.type].wage, 0);
+    return { gold: Math.round(gold), know: Math.round(know), wages };
+}
+
+function newDay() {
+    player.day++;
+    player.weather = Math.random() < 0.3 ? 'rain' : 'clear';
+    const y = dailyYield();
+    player.gold += y.gold;
+    player.knowledge += y.know;
+    let wages = y.wages;
+    let deserted = 0;
+    while (player.gold < wages && player.squad.length) {
+        wages -= UNITS[player.squad.pop().type].wage;
+        deserted++;
+    }
+    player.gold -= wages;
+    const heal = 5 + 10 * bestBarracks();
+    for (const s of player.squad) s.hp = Math.min(unitMaxHp(s.type), s.hp + heal);
+    const sky = player.weather === 'rain' ? 'The monsoon brings rain and richer harvests.' : 'Clear skies.';
+    toast(`Day ${player.day}. ${sky} Provinces paid ${y.gold} gold and ${y.know} knowledge${wages ? `, wages cost ${wages}` : ''}.${deserted ? ` ${deserted} unpaid soldier${deserted > 1 ? 's' : ''} deserted!` : ''}`);
+    save();
+}
+
+function recruitCost(type) {
+    return Math.round(UNITS[type].cost * (1 - 0.1 * bestBarracks()));
+}
+
+function recruitLock(type) {
+    const u = UNITS[type];
+    if (u.research && !hasResearch(u.research)) return `Research ${RESEARCH[u.research].name} first`;
+    if (u.rank && player.rank < u.rank) return `Requires the rank of ${RANKS[u.rank].title}`;
+    if (player.squad.length >= squadCap()) return 'Your squad is full. Rise in rank or build barracks.';
+    if (player.gold < recruitCost(type)) return 'Not enough gold';
+    return null;
+}
+
+function recruit(type) {
+    if (recruitLock(type)) return;
+    player.gold -= recruitCost(type);
+    player.squad.push({ id: ++player.soldierSeq, type, hp: unitMaxHp(type) });
+    toast(`A ${UNITS[type].name} joins your squad`);
+}
+
+function researchState(k) {
+    if (hasResearch(k)) return 'done';
+    return (RESEARCH[k].req || []).every(hasResearch) ? 'open' : 'locked';
+}
+
+function study(k) {
+    const r = RESEARCH[k];
+    if (researchState(k) !== 'open' || player.knowledge < r.cost) return;
+    player.knowledge -= r.cost;
+    player.research.push(k);
+    if (k === 'rockets') player.skills.push('rockets');
+    for (const s of player.squad) s.hp = Math.min(unitMaxHp(s.type), s.hp + (k === 'iron' ? Math.round(UNITS[s.type].hp * 0.4) : 0));
+    toast(`Your scholars mastered ${r.name}`);
+    gainRenown(10);
+}
+
+function buildCost(prov, b) {
+    const lvl = player.provinces[prov][b];
+    return lvl >= 3 ? null : BUILDINGS[b].cost[lvl];
+}
+
+function construct(prov, b) {
+    const cost = buildCost(prov, b);
+    if (cost === null || player.gold < cost) return;
+    player.gold -= cost;
+    player.provinces[prov][b]++;
+    toast(`${BUILDINGS[b].name} in ${PROVINCES[prov].name} is now level ${player.provinces[prov][b]}`);
+    gainRenown(10);
+}
+
+function placeScrolls() {
+    const blocked = new Set([...NPCS, ...BOSSES].map(p => `${p.x},${p.y}`));
+    for (const s of SCROLLS) {
+        const [tx, ty] = s.near;
+        let found = null;
+        for (let r = 0; r < 6 && !found; r++) {
+            for (let dy = -r; dy <= r && !found; dy++) {
+                for (let dx = -r; dx <= r && !found; dx++) {
+                    const x = tx + dx;
+                    const y = ty + dy;
+                    if (walkable(x, y) && !blocked.has(`${x},${y}`) && ground[idx(x, y)] !== '=') found = [x, y];
+                }
+            }
+        }
+        [s.x, s.y] = found || s.near;
+    }
+}
+
+function collectScroll(s) {
+    flags.scrolls.push(s.id);
+    player.knowledge += 15;
+    gainRenown(5);
+    const first = flags.scrolls.length === 1;
+    say(lines('Palm-leaf manuscript',
+        `${s.title}. ${s.fact}`,
+        first ? 'You gain 15 knowledge. Spend knowledge on new sciences in the Research tab of the menu.' : `You gain 15 knowledge. Manuscripts found: ${flags.scrolls.length} of ${SCROLLS.length}.`));
+}
 
 // ---------- Game state ----------
 
@@ -108,6 +343,9 @@ function newPlayer() {
         lvl: 1, xp: 0, hp: 40, prana: 12, gold: 20,
         weapon: 'lathi', armor: 'kurta', owned: ['lathi', 'kurta'],
         items: { ladoo: 3 }, skills: ['vajra'], steps: 0,
+        rank: 0, renown: 0, knowledge: 0, squad: [], soldierSeq: 0, research: [],
+        provinces: Object.fromEntries(Object.keys(PROVINCES).map(k => [k, { market: 0, vidyalaya: 0, barracks: 0 }])),
+        day: 1, time: 0.3, weather: 'clear',
     };
 }
 
@@ -115,9 +353,9 @@ function stats() {
     const l = player.lvl - 1;
     return {
         maxHp: 40 + 10 * l,
-        maxPrana: 12 + 3 * l,
-        atk: 8 + 2 * l + GEAR[player.weapon].atk,
-        def: 3 + l + GEAR[player.armor].def,
+        maxPrana: 12 + 3 * l + (hasResearch('yoga') ? 10 : 0),
+        atk: 8 + 2 * l + GEAR[player.weapon].atk + (hasResearch('wootz') ? 4 : 0),
+        def: 3 + l + GEAR[player.armor].def + (hasResearch('iron') ? 4 : 0),
     };
 }
 
@@ -307,9 +545,13 @@ function tryMove(dir, now) {
         }
         return;
     }
+    trail.unshift({ x: player.x, y: player.y });
+    if (trail.length > 14) trail.length = 14;
     player.x = nx;
     player.y = ny;
     player.steps++;
+    const scroll = SCROLLS.find(sc => sc.x === nx && sc.y === ny && !flags.scrolls.includes(sc.id));
+    if (scroll) { held.clear(); collectScroll(scroll); }
     if (player.steps % 8 === 0) player.prana = Math.min(stats().maxPrana, player.prana + 1);
     if (player.steps % 10 === 0) save();
 
@@ -772,6 +1014,8 @@ function raider() {
 
 const MODEL_BUILDERS = {
     hero: () => humanoid({ skin: '#b9794c', shirt: '#f29a2e', pants: '#f3ead6', hair: '#1d1410', sash: '#d9442b' }),
+    havaldar: () => soldier({ skin: '#9a6440', shirt: '#7a2a2a', pants: '#f3ead6', turban: '#f29a2e', mustache: '#1a1010', sash: '#f2c230' }, 'spear'),
+    captain: () => humanoid({ skin: '#a8714a', shirt: '#2c3e6b', pants: '#f3ead6', turban: '#f2c230', beard: '#1a1010', sash: '#c0392b', scale: 1.1 }),
     elder: () => humanoid({ skin: '#a8714a', shirt: '#f3ead6', pants: '#f3ead6', turban: '#f3ead6', beard: '#e8e4dc', longBeard: true }),
     vaidya: () => humanoid({ skin: '#a8714a', shirt: '#2e8b57', pants: '#2e8b57', robe: true, hair: '#9a9a9a', longHair: true, sash: '#f2c230' }),
     merchant: () => humanoid({ skin: '#b07a50', shirt: '#e6b422', pants: '#f3ead6', turban: '#c0392b', mustache: '#1a1010' }),
@@ -806,7 +1050,7 @@ function weaponMesh(key) {
 }
 
 function makeModel(e) {
-    const key = e.hero ? 'hero' : e.npc || e.kind;
+    const key = e.hero ? 'hero' : e.unit ? `unit_${e.unit}` : e.npc || e.kind;
     const built = MODEL_BUILDERS[key]();
     const root = new THREE.Group();
     const shadow = new THREE.Mesh(
@@ -936,6 +1180,229 @@ function syncModels(now, dt) {
     animateModel(heroModel, player, now, dt);
 }
 
+// ---------- Squad soldiers, sky, weather and manuscripts ----------
+
+let hemi = null;
+let sunLight = null;
+let torch = null;
+let stars = null;
+let rain = null;
+let rainDrops = [];
+const followers = new Map();
+const scrollMeshes = new Map();
+
+function soldier(o, weapon) {
+    const h = humanoid(o);
+    if (weapon === 'spear') {
+        box(h.armR, lambert('#8a5a2b'), 0.04, 1.3, 0.04, 0, -1.1, 0.1);
+        box(h.armR, lambert('#cfd6da', '#202020'), 0.07, 0.16, 0.03, 0, 0.2, 0.1);
+        const armL = h.limbs[2][0];
+        box(armL, lambert('#7a4a22'), 0.06, 0.34, 0.3, -0.06, -0.5, 0.05);
+    } else if (weapon === 'bow') {
+        const armL = h.limbs[2][0];
+        box(armL, lambert('#6b4423'), 0.04, 0.9, 0.04, 0, -0.85, 0.12);
+        box(h.body, lambert('#6b4423'), 0.14, 0.42, 0.1, 0.1, 0.62, -0.17);
+    }
+    return h;
+}
+
+function mounted(horseColor, riderShirt) {
+    const horse = quadruped({ color: horseColor, leg: shade(horseColor, -0.12), size: [1.0, 0.45, 0.36], legH: 0.5, head: 0.28, tail: 0.3, ears: true });
+    const rider = humanoid({ skin: '#a8714a', shirt: riderShirt, pants: '#f3ead6', turban: '#f29a2e', mustache: '#1a1010', scale: 0.75 });
+    box(rider.armR, lambert('#8a5a2b'), 0.04, 1.4, 0.04, 0, -1.0, 0.12);
+    rider.body.position.set(0, 0.62, -0.05);
+    rider.limbs.forEach(([leg], i) => { if (i < 2) leg.rotation.x = -1.2; });
+    horse.body.add(rider.body);
+    return { body: horse.body, limbs: horse.limbs };
+}
+
+function elephant() {
+    const q = quadruped({ color: '#7d7a78', size: [1.25, 0.75, 0.7], legH: 0.55, head: 0.55, tail: 0.25 });
+    const g = q.body;
+    const grey = lambert('#74716d');
+    box(g, grey, 0.08, 0.48, 0.42, -0.34, 0.86, 0.82);
+    box(g, grey, 0.08, 0.48, 0.42, 0.34, 0.86, 0.82);
+    box(g, grey, 0.16, 0.62, 0.16, 0, 0.28, 1.12);
+    box(g, lambert('#f4efe2'), 0.05, 0.05, 0.32, -0.16, 0.78, 1.22);
+    box(g, lambert('#f4efe2'), 0.05, 0.05, 0.32, 0.16, 0.78, 1.22);
+    box(g, lambert('#a3192c'), 0.78, 0.06, 0.95, 0, 1.3, -0.02);
+    box(g, lambert('#f2c230', '#2a1e00'), 0.5, 0.3, 0.5, 0, 1.36, -0.05);
+    box(g, lambert('#a3192c'), 0.56, 0.06, 0.56, 0, 1.66, -0.05);
+    const mahout = humanoid({ skin: '#a8714a', shirt: '#f3ead6', pants: '#f3ead6', turban: '#f29a2e', scale: 0.5 });
+    mahout.body.position.set(0, 1.35, 0.5);
+    mahout.limbs.forEach(([leg], i) => { if (i < 2) leg.rotation.x = -1.3; });
+    g.add(mahout.body);
+    return q;
+}
+
+Object.assign(MODEL_BUILDERS, {
+    unit_paidal: () => soldier({ skin: '#a8714a', shirt: '#f3ead6', pants: '#f3ead6', turban: '#c0392b', sash: '#c0392b' }, 'spear'),
+    unit_archer: () => soldier({ skin: '#b07a50', shirt: '#3d6b35', pants: '#5a4630', turban: '#2f4a2a' }, 'bow'),
+    unit_cavalry: () => mounted('#e6dfd2', '#c0392b'),
+    unit_elephant: elephant,
+});
+
+function trailPoint(i) {
+    if (trail[i]) return trail[i];
+    const back = trail.length ? trail[trail.length - 1] : { x: player.x, y: player.y };
+    return { x: back.x, y: back.y + 0.6 * (i - trail.length + 1) };
+}
+
+// In battle the squad fans out beside and beyond the fight, away from the camera.
+function formationPoint(i, foe) {
+    const midX = (player.x + foe.x) / 2;
+    const midZ = Math.min(player.y, foe.y) + (player.y === foe.y ? 0 : 0.5);
+    const side = i % 2 ? 1 : -1;
+    const k = Math.floor(i / 2);
+    return { x: midX + side * (1.2 + (k % 2) * 0.7 + Math.floor(k / 2) * 0.9), y: midZ - 0.3 - (k % 2) * 0.9 };
+}
+
+function syncFollowers(now, dt) {
+    const ids = new Set(player.squad.map(s => s.id));
+    player.squad.forEach((s, i) => {
+        let f = followers.get(s.id);
+        if (!f) {
+            const start = trailPoint(i);
+            const m = makeModel({ unit: s.type });
+            f = { m, e: { x: start.x, y: start.y, rx: start.x, ry: start.y } };
+            followers.set(s.id, f);
+            scene.add(m.root);
+        }
+        const target = ui.battle ? formationPoint(i, ui.battle.ent) : trailPoint(i);
+        f.e.x = target.x;
+        f.e.y = target.y;
+        approach(f.e, 5.5, dt);
+        if (ui.battle) f.m.facing = Math.atan2(ui.battle.ent.x - f.e.rx, ui.battle.ent.y - f.e.ry);
+        animateModel(f.m, f.e, now, dt);
+    });
+    for (const [id, f] of followers) {
+        if (ids.has(id)) continue;
+        if (!f.m.dyingAt) f.m.dyingAt = now;
+        const p = (now - f.m.dyingAt) / 650;
+        f.m.body.rotation.z = Math.min(1, p * 1.5) * Math.PI / 2;
+        f.m.root.position.y = -Math.max(0, p - 0.5) * 1.2;
+        if (p >= 1) { scene.remove(f.m.root); followers.delete(id); }
+    }
+}
+
+function clearFollowers() {
+    for (const f of followers.values()) scene.remove(f.m.root);
+    followers.clear();
+}
+
+function fxSquad() {
+    if (!ui.battle) return;
+    const foe = ui.battle.ent;
+    const now = performance.now();
+    let i = 0;
+    for (const f of followers.values()) {
+        if (f.m.dyingAt) continue;
+        const dx = foe.x - f.e.rx;
+        const dz = foe.y - f.e.ry;
+        const len = Math.hypot(dx, dz) || 1;
+        setTimeout(() => { f.m.lunge = { start: performance.now(), dx: dx / len, dz: dz / len }; }, i * 70);
+        i++;
+    }
+    return now;
+}
+
+function syncScrolls(now) {
+    for (const s of SCROLLS) {
+        const taken = flags.scrolls.includes(s.id);
+        let mesh = scrollMeshes.get(s.id);
+        if (taken) {
+            if (mesh) { scene.remove(mesh); scrollMeshes.delete(s.id); }
+            continue;
+        }
+        if (!mesh) {
+            mesh = new THREE.Group();
+            const leaf = new THREE.Group();
+            box(leaf, lambert('#e8d7a8', '#4a3a10'), 0.42, 0.1, 0.16, 0, -0.05, 0);
+            box(leaf, lambert('#6b4423'), 0.05, 0.16, 0.22, -0.23, -0.08, 0);
+            box(leaf, lambert('#6b4423'), 0.05, 0.16, 0.22, 0.23, -0.08, 0);
+            box(leaf, lambert('#c0392b'), 0.06, 0.12, 0.18, 0, -0.06, 0);
+            leaf.position.y = 0.55;
+            mesh.add(leaf);
+            const beam = new THREE.Mesh(BOX, new THREE.MeshBasicMaterial({ color: '#ffd76a', transparent: true, opacity: 0.22, depthWrite: false }));
+            beam.scale.set(0.12, 3, 0.12);
+            beam.position.y = 1.5;
+            mesh.add(beam);
+            mesh.userData.leaf = leaf;
+            mesh.position.set(s.x, 0, s.y);
+            scene.add(mesh);
+            scrollMeshes.set(s.id, mesh);
+        }
+        mesh.userData.leaf.rotation.y = now / 700;
+        mesh.userData.leaf.position.y = 0.55 + Math.sin(now / 400 + s.x) * 0.08;
+    }
+}
+
+function lerpColor(a, b, t) {
+    return new THREE.Color(a).lerp(new THREE.Color(b), Math.max(0, Math.min(1, t)));
+}
+
+function updateSky(now, dt) {
+    const t = player.time;
+    const sun = Math.sin((t - 0.25) * Math.PI * 2);
+    const day = Math.max(0, Math.min(1, (sun + 0.15) / 0.45));
+    const dusk = Math.max(0, 1 - Math.abs(sun) / 0.3);
+    const rainy = player.weather === 'rain';
+
+    const sky = lerpColor('#0b1026', rainy ? '#8d9aa6' : SKY, day);
+    if (!rainy) sky.lerp(new THREE.Color('#f08a5d'), dusk * 0.55);
+    scene.background.copy(sky);
+    scene.fog.color.copy(sky);
+    scene.fog.near = rainy ? 9 : 16;
+    scene.fog.far = rainy ? 24 : 32;
+
+    hemi.intensity = 0.22 + 0.62 * day;
+    sunLight.intensity = 0.7 * day * (rainy ? 0.45 : 1);
+    sunLight.color.copy(lerpColor('#fff1d6', '#ff9a5a', dusk));
+    const ang = (t - 0.25) * Math.PI * 2;
+    sunLight.position.set(-Math.cos(ang), Math.max(0.15, Math.sin(ang)), 0.45);
+
+    torch.intensity = (1 - day) * 1.5;
+    torch.position.set(player.rx, 1.6, player.ry + 0.3);
+
+    stars.material.opacity = (1 - day) * (rainy ? 0.1 : 0.9);
+    stars.position.copy(camera.position);
+
+    rain.visible = rainy;
+    if (rainy) {
+        const m = new THREE.Matrix4();
+        rainDrops.forEach((d, i) => {
+            d.y -= dt * 14;
+            if (d.y < 0) { d.y += 9; d.x = rand(-9, 9); d.z = rand(-7, 7); }
+            m.makeScale(0.025, 0.45, 0.025);
+            m.setPosition(camLook.x + d.x, d.y, camLook.z + d.z);
+            rain.setMatrixAt(i, m);
+        });
+        rain.instanceMatrix.needsUpdate = true;
+    }
+}
+
+function initAtmosphere() {
+    torch = new THREE.PointLight('#ffb060', 0, 8, 2);
+    scene.add(torch);
+
+    const pts = [];
+    for (let i = 0; i < 350; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const e = Math.random() * 0.9 + 0.1;
+        pts.push(Math.cos(a) * Math.cos(e) * 70, Math.sin(e) * 70, Math.sin(a) * Math.cos(e) * 70);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+    stars = new THREE.Points(geo, new THREE.PointsMaterial({ color: '#ffffff', size: 0.6, transparent: true, opacity: 0, fog: false }));
+    scene.add(stars);
+
+    rain = new THREE.InstancedMesh(BOX, new THREE.MeshBasicMaterial({ color: '#c4dcf0', transparent: true, opacity: 0.55 }), 450);
+    rainDrops = Array.from({ length: 450 }, () => ({ x: rand(-9, 9), y: rand(0, 9), z: rand(-7, 7) }));
+    rain.frustumCulled = false;
+    rain.visible = false;
+    scene.add(rain);
+}
+
 // ---------- Battle effects ----------
 
 function facePair(ent) {
@@ -1021,7 +1488,10 @@ function render3d(now, dt) {
         f.outer.rotation.y = now / 400;
     }
     syncModels(now, dt);
+    syncFollowers(now, dt);
+    syncScrolls(now);
     updateCamera(dt);
+    updateSky(now, dt);
     renderer.render(scene, camera);
 }
 
@@ -1036,14 +1506,16 @@ function init3d() {
     scene.background = new THREE.Color(SKY);
     scene.fog = new THREE.Fog(SKY, 16, 32);
     camera = new THREE.PerspectiveCamera(45, 1, 0.1, 120);
-    scene.add(new THREE.HemisphereLight('#ffffff', '#6a5a40', 0.8));
-    const sun = new THREE.DirectionalLight('#fff1d6', 0.65);
-    sun.position.set(-0.6, 1, 0.45);
-    scene.add(sun);
+    hemi = new THREE.HemisphereLight('#ffffff', '#6a5a40', 0.8);
+    scene.add(hemi);
+    sunLight = new THREE.DirectionalLight('#fff1d6', 0.65);
+    sunLight.position.set(-0.6, 1, 0.45);
+    scene.add(sunLight);
     BOX = new THREE.BoxGeometry(1, 1, 1);
     makeMaterials();
     heroModel = makeModel({ hero: true });
     scene.add(heroModel.root);
+    initAtmosphere();
     resize();
     return true;
 }
@@ -1067,6 +1539,9 @@ function frame(now) {
     last = now;
 
     if (!uiOpen()) {
+        player.time += dt / DAY_SECONDS;
+        if (player.time >= 1) { player.time -= 1; newDay(); }
+        if (pendingCoronation) { pendingCoronation = false; showEnding('coronation'); }
         if (now >= moveReadyAt && held.size) tryMove([...held].pop(), now);
         moveEnemies(now);
         spawnClock += dt;
@@ -1098,7 +1573,8 @@ function objective() {
     if (!flags.queenDefeated) return 'Destroy the Scorpion Queen in the ruins south-east of the fort.';
     if (!flags.passOpen) return 'Return to Rani Devika.';
     if (!flags.kaalDefeated) return 'Climb the mountain pass north of the fort and face Rakshasa Kaal.';
-    return 'Peace has returned. Explore freely and hunt the strongest beasts.';
+    if (player.rank < RANKS.length - 1) return `Earn renown to be crowned Samrat: ${player.renown} of ${RANKS[RANKS.length - 1].renown}. Build up your provinces from the Empire tab.`;
+    return 'You rule as Samrat. Grow your empire and master every science.';
 }
 
 function renderHud() {
@@ -1107,6 +1583,9 @@ function renderHud() {
     setMeter('hud-hp-bar', 'hud-hp', player.hp, s.maxHp);
     setMeter('hud-prana-bar', 'hud-prana', player.prana, s.maxPrana);
     $('hud-gold').textContent = player.gold;
+    $('hud-know').textContent = player.knowledge;
+    $('hud-rank').textContent = `${RANKS[player.rank].title} · ${RANKS[player.rank].local}`;
+    $('hud-time').textContent = `Day ${player.day} · ${dayPhase().label}${player.weather === 'rain' ? ' · Rain' : ''}`;
     $('quest').innerHTML = `<b>Quest</b>${objective()}`;
 }
 
@@ -1186,12 +1665,18 @@ function talkTo(id) {
                     'Namaste, Veer. Dark days have come to Rampur.',
                     'Sardar Dhurandhar Singh and his dacoits raid us from their camp in Dandak Forest, straight north up the path.',
                     'They smashed the bridge over the Ganga so no help can reach us. Defeat the Sardar, and our carpenters will rebuild it.',
-                    'Train on the boars in the fields first. Seth Govind sells supplies, and Vaidya Kamala will tend your wounds for free.'));
+                    'From today you are Nayak, leader of the village militia. Two of our bravest spearmen will march with you.',
+                    'Havaldar Bhim by the temple can train more soldiers. Seth Govind sells supplies, and Vaidya Kamala will tend your wounds for free.'),
+                () => {
+                    for (let i = 0; i < 2; i++) player.squad.push({ id: ++player.soldierSeq, type: 'paidal', hp: unitMaxHp('paidal') });
+                    toast('Two Paidal spearmen join your squad');
+                });
             } else if (!flags.sardarDefeated) {
                 say(lines(n, 'The dacoit camp lies north through the forest. A guru lives in an ashram east of the path there. He may teach you something useful.'));
             } else if (!flags.bridgeFixed) {
                 flags.bridgeFixed = true;
                 player.gold += 50;
+                gainRenown(40);
                 addItem('kheer', 2);
                 applyFlagsToMap();
                 say(lines(n,
@@ -1210,7 +1695,12 @@ function talkTo(id) {
                 const s = stats();
                 player.hp = s.maxHp;
                 player.prana = s.maxPrana;
-                toast('Health and prana fully restored');
+                if (hasResearch('ayurveda')) {
+                    for (const sol of player.squad) sol.hp = unitMaxHp(sol.type);
+                    toast('You and your squad are fully healed');
+                } else {
+                    toast('Health and prana restored. Research Ayurveda so she can treat your soldiers too.');
+                }
             });
             break;
         case 'merchant':
@@ -1222,6 +1712,9 @@ function talkTo(id) {
                 'If a fight goes badly you can run away. But you can\'t run from a boss!',
                 'Walking slowly refills your prana. Vajra Strike hits really hard.',
                 'A yellow ! means someone has something important to tell you.',
+                'Look for glowing palm-leaf manuscripts! Each one teaches real science and gives knowledge.',
+                'Fighting at night is dangerous, but enemies drop more gold.',
+                'Soldiers want wages every day. If the treasury is empty, they leave!',
             ])));
             break;
         case 'guru':
@@ -1229,8 +1722,10 @@ function talkTo(id) {
                 say(lines(n,
                     'Peace, young warrior. You carry much anger in your shoulders.',
                     'Sit and breathe with me. In through the nose, hold, and out slowly. The breath is life itself.',
-                    'You have learned Pranayama. In battle it will heal your wounds, if you have the prana for it.'),
-                () => { player.skills.push('pranayama'); toast('Learned the skill Pranayama'); });
+                    'You have learned Pranayama. In battle it will heal your wounds, if you have the prana for it.',
+                    'One more lesson. Knowledge is the sharpest weapon. The sages of Bharat wrote their discoveries on palm leaves, and those manuscripts lie scattered across the land.',
+                    'Gather them and let your scholars study. Mathematics, steel, medicine, astronomy: each science will make your people stronger. Take these notes of mine to begin.'),
+                () => { player.skills.push('pranayama'); player.knowledge += 10; toast('Learned Pranayama and received 10 knowledge'); });
             } else {
                 say(lines(n, 'Strength without patience is a river without banks. Breathe, then strike.'));
             }
@@ -1250,6 +1745,7 @@ function talkTo(id) {
             } else if (flags.queenDefeated && !flags.passOpen) {
                 flags.passOpen = true;
                 player.gold += 150;
+                gainRenown(60);
                 applyFlagsToMap();
                 say(lines(n,
                     'The Scorpion Queen is dead! Tonight the whole fort will feast.',
@@ -1266,6 +1762,13 @@ function talkTo(id) {
             break;
         case 'trader':
             say(lines(n, 'Salaam, traveller! Steel from Damascus, kheer from Lucknow. Have a look.'), () => openShop('fort'));
+            break;
+        case 'havaldar':
+            say(lines(n, flags.metElder ? 'Jai Hind, Nayak! Give me gold and I will give you soldiers who never run.' : 'Speak with the Mukhiya first, young one. Then come back and I will train soldiers for you.'),
+                flags.metElder ? () => openShop('recruit') : null);
+            break;
+        case 'captain':
+            say(lines(n, 'The Rani\'s own regiment. Archers, riders, even elephants, if your scholars know how to train them.'), () => openShop('recruit'));
             break;
         default:
             break;
@@ -1286,7 +1789,7 @@ function useItem(key) {
     if (!player.items[key]) delete player.items[key];
     if (it.hp) {
         const before = player.hp;
-        player.hp = Math.min(s.maxHp, player.hp + it.hp);
+        player.hp = Math.min(s.maxHp, player.hp + Math.round(it.hp * (hasResearch('ayurveda') ? 1.5 : 1)));
         return `You eat a ${it.name} and recover ${player.hp - before} health.`;
     }
     const before = player.prana;
@@ -1311,6 +1814,12 @@ function startBattle(ent) {
     battleClearing = { x: (player.x + ent.x) / 2, z: Math.max(player.y, ent.y), r: def.boss ? 3 : 2 };
     worldDirty = true;
     blog(def.boss ? `${def.name} stands before you!` : `A ${def.name} attacks!`);
+    ui.battle.night = dayPhase().night;
+    ui.battle.atkMult = ui.battle.night && !hasResearch('jyotisha') ? 1.15 : 1;
+    if (ui.battle.night) {
+        blog(hasResearch('jyotisha') ? 'A night battle. Your astronomers know these stars, so there is no danger, and the spoils are richer.' : 'A night battle! Enemies hit 15% harder in the dark, but the spoils are 25% richer.', 'bad');
+    }
+    if (player.squad.length) blog(`Your squad of ${player.squad.length} forms up behind you.`);
     $('battle').hidden = false;
     renderBattle();
 }
@@ -1389,9 +1898,17 @@ function battleAction(act, arg) {
         if (player.prana < SKILLS.pranayama.cost) return;
         player.prana -= SKILLS.pranayama.cost;
         const before = player.hp;
-        player.hp = Math.min(s.maxHp, player.hp + Math.round(s.maxHp * 0.4));
+        player.hp = Math.min(s.maxHp, player.hp + Math.round(s.maxHp * (hasResearch('yoga') ? 0.6 : 0.4)));
         blog(`You breathe deeply and recover ${player.hp - before} health.`, 'good');
         floatText(player, `+${player.hp - before}`, '#8fd18a', 1.6);
+    } else if (act === 'rockets') {
+        if (player.prana < SKILLS.rockets.cost) return;
+        player.prana -= SKILLS.rockets.cost;
+        const dmg = Math.round(s.atk * 2.5 * rand(0.9, 1.1));
+        b.hp -= dmg;
+        blog(`Rocket Barrage! Iron-cased rockets scream across the sky for ${dmg} damage.`, 'gold');
+        shake('foe');
+        fxAttack(true, `-${dmg}`, '#ff9a3a');
     } else if (act === 'item') {
         const msg = useItem(arg);
         if (!msg) return;
@@ -1411,10 +1928,11 @@ function battleAction(act, arg) {
         }
     }
 
+    if (b.hp > 0) squadAttack();
     if (b.hp <= 0) return winBattle();
     b.busy = true;
     renderBattle();
-    setTimeout(foeTurn, 600);
+    setTimeout(foeTurn, 650);
 }
 
 function foeTurn() {
@@ -1433,13 +1951,52 @@ function foeTurn() {
             return renderBattle();
         }
     }
-    const dmg = damage(b.def.atk * mult, stats().def);
-    player.hp -= dmg;
-    blog(mult > 1 ? `${b.def.name} unleashes a devastating blow for ${dmg} damage!` : `The ${b.def.name} hits you for ${dmg} damage.`, 'bad');
-    fxAttack(false, `-${dmg}`, '#ff8a75');
+    const atk = b.def.atk * mult * b.atkMult;
+    if (mult === 1 && player.squad.length && Math.random() < 0.3) {
+        const s = pick(player.squad);
+        const dmg = damage(atk * 0.75, 2 + player.rank);
+        blog(`The ${b.def.name} attacks your ${UNITS[s.type].name} for ${dmg} damage.`, 'bad');
+        hurtSoldier(s, dmg);
+    } else {
+        const dmg = damage(atk, stats().def);
+        player.hp -= dmg;
+        blog(mult > 1 ? `${b.def.name} unleashes a devastating blow for ${dmg} damage!` : `The ${b.def.name} hits you for ${dmg} damage.`, 'bad');
+        fxAttack(false, `-${dmg}`, '#ff8a75');
+        if (mult > 1) {
+            for (const s of [...player.squad]) hurtSoldier(s, damage(atk * 0.45, 2 + player.rank));
+            if (player.squad.length) blog('The shockwave tears through your squad!', 'bad');
+        }
+    }
     b.busy = false;
     if (player.hp <= 0) return loseBattle();
     renderBattle();
+}
+
+function squadAttack() {
+    const b = ui.battle;
+    if (!player.squad.length) return;
+    let total = 0;
+    for (const sol of player.squad) {
+        total += Math.max(1, Math.round(UNITS[sol.type].atk * squadMult() * rand(0.8, 1.2) - b.def.def * 0.4));
+    }
+    b.hp -= total;
+    blog(`Your squad strikes for ${total} damage.`);
+    fxSquad();
+    setTimeout(() => floatText(b.ent, `-${total}`, '#9fd3f0', b.def.boss ? 2.2 : 1.1), 220);
+}
+
+function hurtSoldier(sol, dmg) {
+    sol.hp -= dmg;
+    const f = followers.get(sol.id);
+    if (f) f.m.flashUntil = performance.now() + 300;
+    if (sol.hp > 0) return;
+    if (hasResearch('surgery') && Math.random() < 0.6) {
+        sol.hp = 1;
+        blog(`Your ${UNITS[sol.type].name} falls, but Sushruta's surgery saves their life.`, 'good');
+        return;
+    }
+    player.squad = player.squad.filter(x => x !== sol);
+    blog(`Your ${UNITS[sol.type].name} has fallen in battle.`, 'bad');
 }
 
 function winBattle() {
@@ -1449,11 +2006,15 @@ function winBattle() {
     b.won = true;
     entities = entities.filter(e => e !== b.ent);
     blog(`The ${b.def.name} is defeated!`, 'good');
-    if (b.def.xp || b.def.gold) {
-        player.xp += b.def.xp;
-        player.gold += b.def.gold;
-        blog(`You gain ${b.def.xp} experience and ${b.def.gold} gold.`, 'gold');
-    }
+    const spoils = b.night ? 1.25 : 1;
+    const xp = Math.round(b.def.xp * spoils);
+    const gold = Math.round(b.def.gold * goldMult() * spoils);
+    const renown = b.def.boss ? { sardar: 60, queen: 120, kaal: 200 }[b.ent.kind] : Math.ceil(b.def.xp / 6);
+    const know = b.def.boss ? 10 : 1;
+    player.xp += xp;
+    player.gold += gold;
+    player.knowledge += know;
+    blog(`You gain ${xp} experience, ${gold} gold, ${renown} renown and ${know} knowledge.`, 'gold');
     player.prana = Math.min(stats().maxPrana, player.prana + 2);
     while (player.xp >= xpToNext(player.lvl)) {
         player.xp -= xpToNext(player.lvl);
@@ -1464,6 +2025,7 @@ function winBattle() {
         blog(`Level up! You are now level ${player.lvl}. Health and prana restored.`, 'gold');
     }
     if (b.def.boss) flags[b.def.boss] = true;
+    gainRenown(renown);
     save();
     renderBattle();
 }
@@ -1493,6 +2055,7 @@ function endBattle() {
         player.x = player.rx = START.x;
         player.y = player.ry = START.y;
         lastRegion = 'village';
+        trail = [];
         say(lines('Vaidya Kamala', `Villagers carried you home, Veer. You lost ${lostGold} gold on the road, but you will live. Rest, then try again.`));
     } else if (b.won && b.def.boss) {
         const after = {
@@ -1500,15 +2063,24 @@ function endBattle() {
             queen: lines('Veer', 'The Scorpion Queen crumbles into the sand. I should tell Rani Devika.'),
             kaal: lines('Rakshasa Kaal', 'Impossible... defeated by a farmer from Rampur... The mountains... are free...'),
         }[b.ent.kind];
-        say(after, b.ent.kind === 'kaal' ? showEnding : null);
+        say(after, b.ent.kind === 'kaal' ? () => {
+            const crowned = pendingCoronation || player.rank === RANKS.length - 1;
+            pendingCoronation = false;
+            showEnding(crowned ? 'coronation' : 'victory');
+        } : null);
     }
     save();
     renderHud();
 }
 
-function showEnding() {
+function showEnding(kind) {
     ui.ending = true;
-    $('ending-text').textContent = `Rakshasa Kaal is no more. From the Himalayan snows to the banks of the Ganga, people light diyas in your honour. Veer of Rampur reached level ${player.lvl} and saved the land.`;
+    held.clear();
+    const crowned = kind === 'coronation';
+    $('ending-title').textContent = crowned ? 'Samrat Veer' : 'The land is at peace';
+    $('ending-text').textContent = crowned
+        ? `On the banks of the Ganga, the people crown you Samrat, Emperor of Bharat. You began as the Nayak of a village militia. Now you rule ${unlockedProvinces().length} provinces, command ${player.squad.length} soldiers and have mastered ${player.research.length} sciences.`
+        : `Rakshasa Kaal is no more, and the Himalayan Pass is yours to govern. Keep building your provinces and earning renown. At ${RANKS[RANKS.length - 1].renown} renown the people will crown you Samrat. You have ${player.renown}.`;
     $('ending').hidden = false;
 }
 
@@ -1521,7 +2093,20 @@ function openShop(key) {
     $('shop').hidden = false;
 }
 
+const UNIT_ICON = { paidal: '🛡️', archer: '🏹', cavalry: '🐎', elephant: '🐘' };
+
+function renderRecruit() {
+    $('shop-title').textContent = 'Recruit soldiers';
+    $('shop-gold').textContent = `${player.gold} · squad ${player.squad.length} of ${squadCap()}`;
+    $('shop-list').innerHTML = Object.entries(UNITS).map(([k, u]) => {
+        const lock = recruitLock(k);
+        return `<li><span class="ico">${UNIT_ICON[k]}</span><span class="what"><b>${u.name}</b><small>${u.role} · attack ${u.atk}, health ${unitMaxHp(k)} · wage ${u.wage} gold a day${lock ? ` · ${lock}` : ''}</small></span>
+            <button data-recruit="${k}" ${lock ? 'disabled' : ''}>Recruit · ${recruitCost(k)}</button></li>`;
+    }).join('');
+}
+
 function renderShop() {
+    if (ui.shop === 'recruit') return renderRecruit();
     const shop = SHOPS[ui.shop];
     $('shop-title').textContent = shop.title;
     $('shop-gold').textContent = player.gold;
@@ -1570,14 +2155,27 @@ function openMenu() {
     $('menu').hidden = false;
 }
 
+let menuTab = 'hero';
+
 function renderMenu() {
+    const tabs = [['hero', 'Veer'], ['squad', 'Squad'], ['research', 'Research'], ['empire', 'Empire']];
+    const nav = `<div class="tabs" role="tablist">${tabs.map(([k, label]) =>
+        `<button role="tab" data-tab="${k}" aria-selected="${menuTab === k}">${label}</button>`).join('')}</div>`;
+    const body = { hero: menuHero, squad: menuSquad, research: menuResearch, empire: menuEmpire }[menuTab]();
+    $('menu-body').innerHTML = nav + body;
+}
+
+function statBox(label, value) {
+    return `<div class="stat"><small>${label}</small><b>${value}</b></div>`;
+}
+
+function menuHero() {
     const s = stats();
-    const statBox = (label, value) => `<div class="stat"><small>${label}</small><b>${value}</b></div>`;
     const items = Object.entries(player.items).filter(([, n]) => n > 0);
-    $('menu-body').innerHTML = `
+    return `
         <h3>Current quest</h3>
         <p>${objective()}</p>
-        <h3>Veer</h3>
+        <h3>Veer, ${RANKS[player.rank].title}</h3>
         <div class="stats">
             ${statBox('Level', player.lvl)}
             ${statBox('Experience', `${player.xp} / ${xpToNext(player.lvl)}`)}
@@ -1585,9 +2183,6 @@ function renderMenu() {
             ${statBox('Prana', `${player.prana} / ${s.maxPrana}`)}
             ${statBox('Attack', s.atk)}
             ${statBox('Defense', s.def)}
-        </div>
-        <h3>Equipment</h3>
-        <div class="stats">
             ${statBox('Weapon', `${GEAR[player.weapon].icon} ${GEAR[player.weapon].name}`)}
             ${statBox('Armour', `${GEAR[player.armor].icon} ${GEAR[player.armor].name}`)}
         </div>
@@ -1598,6 +2193,71 @@ function renderMenu() {
         <div class="menu-foot">
             <button class="ghost" id="restart">${restartArmed ? 'Click again to erase your journey' : 'New game'}</button>
         </div>`;
+}
+
+function meter(value, max, cls = '') {
+    return `<span class="mini-meter ${cls}"><span style="width:${Math.max(0, Math.min(100, (value / max) * 100))}%"></span></span>`;
+}
+
+function menuSquad() {
+    const y = dailyYield();
+    const rows = player.squad.map(sol => {
+        const u = UNITS[sol.type];
+        const max = unitMaxHp(sol.type);
+        return `<li><span class="ico">${UNIT_ICON[sol.type]}</span><span class="what"><b>${u.name}</b><small>${u.role} · attack ${Math.round(u.atk * squadMult())} · wage ${u.wage} a day</small>${meter(sol.hp, max)}<small>${Math.max(0, sol.hp)} / ${max} health</small></span><button data-dismiss="${sol.id}">Dismiss</button></li>`;
+    }).join('');
+    const types = Object.entries(UNITS).map(([k, u]) => {
+        const need = u.research && !hasResearch(u.research) ? `Needs ${RESEARCH[u.research].name}` : u.rank && player.rank < u.rank ? `Needs rank ${RANKS[u.rank].title}` : 'Available';
+        return `<li><span class="ico">${UNIT_ICON[k]}</span><span class="what"><b>${u.name}</b><small>${u.role} · ${recruitCost(k)} gold · ${need}</small></span><span></span></li>`;
+    }).join('');
+    return `
+        <h3>Your squad · ${player.squad.length} of ${squadCap()}</h3>
+        <p class="panel-sub">Soldiers march behind you and strike after every action you take in battle. Wages cost ${y.wages} gold a day. Recruit from Havaldar Bhim in Rampur or Senapati Arjan in the desert fort.</p>
+        ${rows ? `<ul class="offers">${rows}</ul>` : '<p class="panel-sub">No soldiers march with you yet.</p>'}
+        <h3>Troop types</h3>
+        <ul class="offers">${types}</ul>`;
+}
+
+function menuResearch() {
+    const tiers = [1, 2, 3, 4].map(t => {
+        const cards = Object.entries(RESEARCH).filter(([, r]) => r.tier === t).map(([k, r]) => {
+            const st = researchState(k);
+            const action = st === 'done' ? '<span class="tag done">Mastered</span>'
+                : st === 'locked' ? `<span class="tag">Needs ${r.req.map(q => RESEARCH[q].name).join(' and ')}</span>`
+                : `<button data-study="${k}" ${player.knowledge >= r.cost ? '' : 'disabled'}>Study · ${r.cost}</button>`;
+            return `<li class="tech ${st}"><span class="what"><b>${r.name}</b><small class="src">${r.source}</small><small>${r.effect}</small></span>${action}</li>`;
+        }).join('');
+        return `<h3>Tier ${t}</h3><ul class="offers">${cards}</ul>`;
+    }).join('');
+    return `<p class="panel-sub">Knowledge: <b>${player.knowledge}</b>. Earn it in battle, from palm-leaf manuscripts (${flags.scrolls.length} of ${SCROLLS.length} found) and from Vidyalayas in your provinces.</p>${tiers}`;
+}
+
+function menuEmpire() {
+    const y = dailyYield();
+    const next = RANKS[player.rank + 1];
+    const ladder = RANKS.map((rk, i) => `<li class="${i === player.rank ? 'current' : i < player.rank ? 'past' : ''}"><b>${rk.title}</b><small>${rk.local} · ${rk.renown} renown · squad ${rk.squad}</small></li>`).join('');
+    const nextLine = next
+        ? `${player.renown} of ${next.renown} renown to become ${next.title}${next.needs && !flags[next.needs] ? ` (you must also ${{ sardarDefeated: 'defeat the Sardar', queenDefeated: 'destroy the Scorpion Queen', kaalDefeated: 'defeat Rakshasa Kaal' }[next.needs]})` : ''}.`
+        : 'You have reached the highest rank.';
+    const provs = Object.entries(PROVINCES).map(([k, pv]) => {
+        if (pv.unlock && !flags[pv.unlock]) return `<div class="prov locked"><b>${pv.name}</b><small>${pv.how} to rule this province.</small></div>`;
+        const p = player.provinces[k];
+        const rows = Object.entries(BUILDINGS).map(([bk, bd]) => {
+            const cost = buildCost(k, bk);
+            const pips = [1, 2, 3].map(l => `<i class="${p[bk] >= l ? 'on' : ''}"></i>`).join('');
+            return `<li><span class="what"><b>${bd.name} <span class="pips">${pips}</span></b><small>${bd.kind} · ${bd.desc}</small></span>${cost === null ? '<span class="tag done">Max</span>' : `<button data-build="${k}:${bk}" ${player.gold >= cost ? '' : 'disabled'}>${p[bk] ? 'Upgrade' : 'Build'} · ${cost}</button>`}</li>`;
+        }).join('');
+        return `<div class="prov"><b>${pv.name}</b><small>Base tax ${pv.tax} gold a day</small><ul class="offers">${rows}</ul></div>`;
+    }).join('');
+    return `
+        <h3>Rank</h3>
+        <p>${nextLine}</p>
+        ${next ? meter(player.renown - RANKS[player.rank].renown, next.renown - RANKS[player.rank].renown, 'renown') : ''}
+        <ol class="ladder">${ladder}</ol>
+        <h3>Treasury</h3>
+        <p class="panel-sub">Day ${player.day}, ${dayPhase().label.toLowerCase()}${player.weather === 'rain' ? ', monsoon rain' : ''}. Each dawn your provinces pay <b>${y.gold}</b> gold and <b>${y.know}</b> knowledge, and your soldiers draw <b>${y.wages}</b> gold in wages.</p>
+        <h3>Provinces</h3>
+        <div class="provs">${provs}</div>`;
 }
 
 function closeSheet(name) {
@@ -1627,9 +2287,13 @@ function startGame(data) {
     player.rx = player.x;
     player.ry = player.y;
     flags = data ? data.flags : {};
+    flags.scrolls = flags.scrolls || [];
     buildWorld();
     applyFlagsToMap();
-    if (renderer) clearModels();
+    placeScrolls();
+    trail = [];
+    pendingCoronation = false;
+    if (renderer) { clearModels(); clearFollowers(); }
     entities = [];
     spawnStatic();
     populate(true);
@@ -1694,8 +2358,18 @@ $('battle-actions').addEventListener('click', ev => {
 $('shop-list').addEventListener('click', ev => {
     const btn = ev.target.closest('button[data-buy]');
     if (btn && !btn.disabled) buy(btn.dataset.buy);
+    const rec = ev.target.closest('button[data-recruit]');
+    if (rec && !rec.disabled) { recruit(rec.dataset.recruit); save(); renderShop(); renderHud(); }
 });
 $('menu-body').addEventListener('click', ev => {
+    const tab = ev.target.closest('button[data-tab]');
+    if (tab) { menuTab = tab.dataset.tab; renderMenu(); return; }
+    const st = ev.target.closest('button[data-study]');
+    if (st && !st.disabled) { study(st.dataset.study); save(); renderMenu(); renderHud(); return; }
+    const bd = ev.target.closest('button[data-build]');
+    if (bd && !bd.disabled) { const [pk, bk] = bd.dataset.build.split(':'); construct(pk, bk); save(); renderMenu(); renderHud(); return; }
+    const dm = ev.target.closest('button[data-dismiss]');
+    if (dm) { player.squad = player.squad.filter(x => String(x.id) !== dm.dataset.dismiss); toast('The soldier returns home'); save(); renderMenu(); return; }
     const use = ev.target.closest('button[data-use]');
     if (use) {
         const msg = useItem(use.dataset.use);
