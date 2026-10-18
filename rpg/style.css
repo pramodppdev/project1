@@ -226,29 +226,68 @@ canvas { display: block; width: 100%; height: 100%; }
     overflow-y: auto;
 }
 
-.battle { display: flex; flex-direction: column; gap: 12px; }
-.battle[hidden] { display: none; }
-.battle-stage {
-    flex: 1;
-    min-height: 170px;
-    display: grid;
-    grid-template-columns: 1fr 1fr;
+.battle {
+    position: absolute;
+    inset: 0;
+    z-index: 6;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
     align-items: center;
-    gap: 16px;
-    border-radius: 10px;
-    background: radial-gradient(ellipse at 50% 120%, color-mix(in srgb, var(--saffron) 25%, transparent), transparent 60%);
+    padding: 84px 12px 12px;
+    pointer-events: none;
 }
-.combatant { display: grid; gap: 6px; justify-items: center; min-width: 0; }
-.combatant .meter { width: min(220px, 100%); }
+.battle[hidden] { display: none; }
+.battle > * { pointer-events: auto; }
+.foe-card {
+    display: grid;
+    gap: 6px;
+    justify-items: center;
+    width: min(320px, 100%);
+    padding: 10px 14px;
+    background: color-mix(in srgb, var(--ink) 85%, transparent);
+    border: 1px solid var(--panel-edge);
+    border-radius: 10px;
+}
+.foe-card .meter { width: 100%; }
+.foe-card.boss { border-color: var(--saffron); box-shadow: 0 0 18px color-mix(in srgb, var(--vermilion) 60%, transparent); }
 .combatant-name { font-family: var(--display); font-size: 1.15rem; text-align: center; text-wrap: balance; }
-.combatant-name span { font-family: var(--body); font-size: 0.85rem; color: var(--saffron); }
-.foe-icon { font-size: clamp(56px, 12vw, 96px); line-height: 1.1; }
-.foe.boss .foe-icon { filter: drop-shadow(0 0 14px var(--vermilion)); }
+.battle-panel {
+    width: 100%;
+    display: grid;
+    gap: 8px;
+    padding: 10px;
+    background: var(--panel);
+    border: 2px solid var(--saffron);
+    border-radius: 10px;
+}
+.frame.in-battle .quest, .frame.in-battle .dpad { display: none; }
 .hit { animation: hit 0.35s ease; }
 @keyframes hit {
     0%, 100% { transform: translateX(0); }
     25% { transform: translateX(-8px); }
     75% { transform: translateX(8px); }
+}
+
+.dmg {
+    position: absolute;
+    z-index: 7;
+    transform: translate(-50%, -50%);
+    font-family: var(--display);
+    font-size: 1.7rem;
+    text-shadow: 0 2px 0 #1a1322, 0 0 8px rgba(0, 0, 0, 0.6);
+    pointer-events: none;
+    animation: rise 1s ease-out forwards;
+}
+@keyframes rise { to { transform: translate(-50%, -190%); opacity: 0; } }
+
+.engine-error {
+    position: absolute;
+    inset: 40% 16px auto;
+    text-align: center;
+    background: var(--panel);
+    padding: 12px;
+    border-radius: 8px;
 }
 
 .battle-log {
@@ -257,7 +296,7 @@ canvas { display: block; width: 100%; height: 100%; }
     padding: 8px 12px;
     background: var(--panel);
     border-radius: 8px;
-    height: 92px;
+    height: 70px;
     overflow-y: auto;
     font-size: 0.9rem;
     display: flex;
@@ -303,12 +342,11 @@ canvas { display: block; width: 100%; height: 100%; }
 .ending button { justify-self: center; }
 
 @media (max-width: 560px) {
-    .battle-stage { grid-template-columns: 1fr; gap: 8px; }
-    .hero .meter { width: min(260px, 100%); }
-    .frame { height: min(78vh, 640px); }
+    .frame { height: min(80vh, 680px); }
+    .battle-actions button { flex-basis: 40%; padding: 8px 10px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .hit, .banner { animation: none; }
+    .hit, .banner, .dmg { animation: none; }
     .meter span { transition: none; }
 }

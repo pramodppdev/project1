@@ -7,7 +7,6 @@ const MAP_H = 32;
 const SAVE_KEY = 'legends-of-bharat-v1';
 const START = { x: 8, y: 24 };
 const STEP_MS = 150;
-const EMOJI_FONT = '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif';
 
 const REGIONS = {
     village: { name: 'Rampur Village', safe: true },
@@ -75,21 +74,6 @@ const BOSSES = [
     { kind: 'kaal', x: 41, y: 4 },
 ];
 
-const PAL = {
-    grass: '#7aa04a', grass2: '#6f9643',
-    forest: '#3f6b33', forest2: '#375f2c',
-    sand: '#e2c27d', sand2: '#d8b46c',
-    snow: '#e6ecf0', snow2: '#d6dee5',
-    path: '#c9a46a', path2: '#bf9a60',
-    water: '#2f7fb5', wave: '#6cb4e0',
-    plank: '#8a5a2b', plank2: '#6e4520',
-    trunk: '#6b4423', leaf: '#2c5a26', leaf2: '#3d7a32',
-    cactus: '#4f8f3a', rock: '#8a8784', rock2: '#6d6a67',
-    mud: '#c58b56', thatch: '#8a5a2b', door: '#4a2c14',
-    stone: '#c99a5b', stone2: '#a87b42',
-    temple: '#e07b2a', flag: '#f2c230',
-    tent: '#9c2f2f', fire: '#ffb02e',
-};
 
 // ---------- Game state ----------
 
@@ -238,6 +222,7 @@ function buildWorld() {
 }
 
 function applyFlagsToMap() {
+    worldDirty = true;
     if (flags.bridgeFixed) {
         for (const x of [16, 17]) { ground[idx(x, 21)] = '='; objects[idx(x, 21)] = ''; }
     }
@@ -384,278 +369,683 @@ function moveEnemies(now) {
     }
 }
 
-// ---------- Rendering the world ----------
+// ---------- 3D rendering (blocky voxel style) ----------
 
 const canvas = $('world');
-const ctx = canvas.getContext('2d');
-let viewW = 0;
-let viewH = 0;
-let ts = 40;
-
-function resize() {
-    const rect = canvas.getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
-    viewW = rect.width;
-    viewH = rect.height;
-    canvas.width = Math.round(rect.width * dpr);
-    canvas.height = Math.round(rect.height * dpr);
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ts = viewW < 600 ? 34 : 44;
-}
+let renderer = null;
+let scene = null;
+let camera = null;
+let BOX = null;
+let worldGroup = null;
+let waterTex = null;
+let heroModel = null;
+let worldDirty = true;
+let viewW = 1;
+let viewH = 1;
+let flames = [];
+let battleClearing = null;
+const MATS = {};
+const models = new Map();
+const SKY = '#9fd3f0';
 
 function hash(x, y) {
     return ((x * 73856093) ^ (y * 19349663)) >>> 0;
 }
 
-function drawGround(g, x, y, sx, sy, t) {
-    const alt = hash(x, y) % 4 === 0;
-    const fill = {
-        '.': alt ? PAL.grass2 : PAL.grass,
-        f: alt ? PAL.forest2 : PAL.forest,
-        s: alt ? PAL.sand2 : PAL.sand,
-        n: alt ? PAL.snow2 : PAL.snow,
-        p: alt ? PAL.path2 : PAL.path,
-        '~': PAL.water,
-        '=': PAL.water,
-    }[g];
-    ctx.fillStyle = fill;
-    ctx.fillRect(sx, sy, ts + 1, ts + 1);
-
-    if (g === '~' || g === '=') {
-        ctx.strokeStyle = PAL.wave;
-        ctx.lineWidth = 1.5;
-        const off = ((t / 900) + (y * 0.37)) % 1;
-        ctx.beginPath();
-        for (let i = 0; i < 2; i++) {
-            const wy = sy + ts * (0.3 + i * 0.4);
-            const wx = sx + ts * (off * 0.5 + i * 0.2);
-            ctx.moveTo(wx, wy);
-            ctx.quadraticCurveTo(wx + ts * 0.12, wy - 3, wx + ts * 0.25, wy);
-        }
-        ctx.stroke();
-    }
-    if (g === '=') {
-        ctx.fillStyle = PAL.plank;
-        ctx.fillRect(sx, sy + ts * 0.12, ts + 1, ts * 0.76);
-        ctx.strokeStyle = PAL.plank2;
-        ctx.lineWidth = 1;
-        for (let i = 1; i < 5; i++) {
-            ctx.beginPath();
-            ctx.moveTo(sx + (ts * i) / 5, sy + ts * 0.12);
-            ctx.lineTo(sx + (ts * i) / 5, sy + ts * 0.88);
-            ctx.stroke();
-        }
-    }
+function shade(hex, amt) {
+    const c = new THREE.Color(hex);
+    c.offsetHSL(0, 0, amt);
+    return `#${c.getHexString()}`;
 }
 
-function drawObject(o, x, y, sx, sy, t) {
-    const c = ts / 2;
+// A 16x16 noisy texture with nearest-neighbour filtering gives the chunky pixel look.
+function pixelTexture(base, opts = {}) {
+    const c = document.createElement('canvas');
+    c.width = c.height = 16;
+    const g = c.getContext('2d');
+    const rng = mulberry32(parseInt(base.slice(1), 16) + (opts.seed || 0));
+    for (let y = 0; y < 16; y++) {
+        for (let x = 0; x < 16; x++) {
+            let col = shade(base, (rng() - 0.5) * (opts.vary ?? 0.08));
+            if (opts.pattern) col = opts.pattern(x, y, rng) || col;
+            g.fillStyle = col;
+            g.fillRect(x, y, 1, 1);
+        }
+    }
+    const tex = new THREE.CanvasTexture(c);
+    tex.magFilter = THREE.NearestFilter;
+    tex.minFilter = THREE.NearestFilter;
+    return tex;
+}
+
+function texMat(base, opts) {
+    return new THREE.MeshLambertMaterial({ map: pixelTexture(base, opts) });
+}
+
+function makeMaterials() {
+    const dots = (base, amt, chance) => (x, y, r) => (r() < chance ? shade(base, amt) : null);
+    MATS.grass = texMat('#6aa84f', { vary: 0.1, pattern: dots('#6aa84f', 0.1, 0.08) });
+    MATS.forestGrass = texMat('#4a7a36', { vary: 0.1, pattern: dots('#4a7a36', -0.08, 0.12) });
+    MATS.sand = texMat('#e3c37e', { vary: 0.06 });
+    MATS.snow = texMat('#eef3f6', { vary: 0.04 });
+    MATS.path = texMat('#c8a165', { vary: 0.1, pattern: dots('#a9875a', 0, 0.12) });
+    MATS.riverbed = texMat('#8a7a55', { vary: 0.1 });
+    waterTex = pixelTexture('#3b86c4', { vary: 0.05, pattern: (x, y) => ((x + y * 2) % 8 < 2 ? '#62a6dc' : null) });
+    waterTex.wrapS = waterTex.wrapT = THREE.RepeatWrapping;
+    MATS.water = new THREE.MeshLambertMaterial({ map: waterTex, transparent: true, opacity: 0.85 });
+    MATS.bark = texMat('#6b4423', { pattern: (x) => (x % 4 === 0 ? '#553519' : null) });
+    MATS.leaves = texMat('#2f6b2a', { vary: 0.12, pattern: dots('#24561f', 0, 0.18) });
+    MATS.cactus = texMat('#4f8f3a', { pattern: (x) => (x % 4 === 1 ? '#3d7330' : null) });
+    MATS.stone = texMat('#8c8a87', { vary: 0.1, pattern: dots('#6f6d6a', 0, 0.15) });
+    MATS.stoneDark = texMat('#6a6764', { vary: 0.1 });
+    MATS.mud = texMat('#c58b56', { vary: 0.08 });
+    MATS.thatch = texMat('#b0843f', { pattern: (x, y) => (y % 3 === 0 ? '#8e6a30' : null) });
+    MATS.door = texMat('#4a2c14', { vary: 0.05 });
+    const brick = (x, y) => (y % 4 === 0 || (x + (Math.floor(y / 4) % 2) * 4) % 8 === 0 ? '#e4c08a' : null);
+    MATS.sandstone = texMat('#d2a464', { vary: 0.05, pattern: brick });
+    MATS.plank = texMat('#8a5a2b', { pattern: (x, y) => (y % 4 === 0 ? '#6e4520' : null) });
+    MATS.tent = texMat('#9c2f2f', { pattern: (x) => (x % 5 === 0 ? '#7d2424' : null) });
+    MATS.saffron = texMat('#e07b2a', { vary: 0.06 });
+    MATS.gold = texMat('#f2c230', { vary: 0.08 });
+    MATS.black = new THREE.MeshLambertMaterial({ color: '#140c10' });
+    MATS.flame = new THREE.MeshBasicMaterial({ color: '#ffb02e' });
+    MATS.flameCore = new THREE.MeshBasicMaterial({ color: '#fff1a8' });
+}
+
+function addObject(part, o, x, z) {
+    const h = hash(x, z);
     switch (o) {
-        case 'T':
-            ctx.fillStyle = PAL.trunk;
-            ctx.fillRect(sx + c - ts * 0.06, sy + ts * 0.55, ts * 0.12, ts * 0.35);
-            ctx.fillStyle = PAL.leaf;
-            circle(sx + c, sy + ts * 0.42, ts * 0.34);
-            ctx.fillStyle = PAL.leaf2;
-            circle(sx + c - ts * 0.08, sy + ts * 0.35, ts * 0.18);
-            break;
-        case 'c':
-            ctx.fillStyle = PAL.cactus;
-            roundRect(sx + c - ts * 0.08, sy + ts * 0.2, ts * 0.16, ts * 0.7, ts * 0.08);
-            roundRect(sx + c - ts * 0.3, sy + ts * 0.4, ts * 0.12, ts * 0.25, ts * 0.06);
-            roundRect(sx + c + ts * 0.18, sy + ts * 0.32, ts * 0.12, ts * 0.25, ts * 0.06);
-            break;
-        case 'M':
-            ctx.fillStyle = PAL.rock2;
-            tri(sx + ts * 0.05, sy + ts * 0.95, sx + c, sy + ts * 0.08, sx + ts * 0.95, sy + ts * 0.95);
-            ctx.fillStyle = PAL.rock;
-            tri(sx + ts * 0.2, sy + ts * 0.95, sx + c, sy + ts * 0.08, sx + ts * 0.62, sy + ts * 0.95);
-            ctx.fillStyle = PAL.snow;
-            tri(sx + c - ts * 0.13, sy + ts * 0.3, sx + c, sy + ts * 0.08, sx + c + ts * 0.13, sy + ts * 0.3);
-            break;
-        case 'H':
-            ctx.fillStyle = PAL.mud;
-            ctx.fillRect(sx + ts * 0.12, sy + ts * 0.42, ts * 0.76, ts * 0.5);
-            ctx.fillStyle = PAL.thatch;
-            tri(sx + ts * 0.02, sy + ts * 0.46, sx + c, sy + ts * 0.08, sx + ts * 0.98, sy + ts * 0.46);
-            ctx.fillStyle = PAL.door;
-            ctx.fillRect(sx + c - ts * 0.09, sy + ts * 0.62, ts * 0.18, ts * 0.3);
-            break;
-        case 'K':
-            ctx.fillStyle = PAL.temple;
-            ctx.fillRect(sx + ts * 0.18, sy + ts * 0.55, ts * 0.64, ts * 0.38);
-            tri(sx + ts * 0.25, sy + ts * 0.58, sx + c, sy + ts * 0.1, sx + ts * 0.75, sy + ts * 0.58);
-            ctx.fillStyle = PAL.flag;
-            tri(sx + c, sy + ts * 0.02, sx + c + ts * 0.22, sy + ts * 0.08, sx + c, sy + ts * 0.14);
-            ctx.fillStyle = PAL.door;
-            ctx.fillRect(sx + c - ts * 0.08, sy + ts * 0.7, ts * 0.16, ts * 0.23);
-            break;
-        case 'w':
-            ctx.fillStyle = PAL.rock;
-            circle(sx + c, sy + c, ts * 0.36);
-            ctx.fillStyle = PAL.water;
-            circle(sx + c, sy + c, ts * 0.22);
-            break;
-        case 'W':
-            ctx.fillStyle = PAL.stone;
-            ctx.fillRect(sx, sy + ts * 0.1, ts + 1, ts * 0.85);
-            ctx.strokeStyle = PAL.stone2;
-            ctx.lineWidth = 1;
-            for (let r = 0; r < 3; r++) {
-                const ry = sy + ts * (0.1 + r * 0.28);
-                ctx.strokeRect(sx + (r % 2 ? ts * 0.25 : 0), ry, ts * 0.5, ts * 0.28);
-            }
-            break;
-        case 'R':
-            ctx.fillStyle = PAL.rock2;
-            circle(sx + ts * 0.35, sy + ts * 0.6, ts * 0.3);
-            ctx.fillStyle = PAL.rock;
-            circle(sx + ts * 0.65, sy + ts * 0.5, ts * 0.28);
-            break;
-        case 'C':
-            ctx.fillStyle = PAL.rock2;
-            ctx.fillRect(sx, sy, ts + 1, ts + 1);
-            ctx.fillStyle = '#120c14';
-            ctx.beginPath();
-            ctx.ellipse(sx + c, sy + ts * 0.75, ts * 0.32, ts * 0.5, 0, Math.PI, 0);
-            ctx.fill();
-            break;
-        case 'A':
-            ctx.fillStyle = PAL.tent;
-            tri(sx + ts * 0.08, sy + ts * 0.9, sx + c, sy + ts * 0.12, sx + ts * 0.92, sy + ts * 0.9);
-            ctx.fillStyle = PAL.door;
-            tri(sx + c - ts * 0.12, sy + ts * 0.9, sx + c, sy + ts * 0.5, sx + c + ts * 0.12, sy + ts * 0.9);
-            break;
-        case 'F': {
-            ctx.fillStyle = PAL.trunk;
-            ctx.fillRect(sx + ts * 0.2, sy + ts * 0.72, ts * 0.6, ts * 0.12);
-            const flick = Math.sin(t / 120 + x) * ts * 0.05;
-            ctx.fillStyle = PAL.fire;
-            tri(sx + ts * 0.3, sy + ts * 0.74, sx + c + flick, sy + ts * 0.22, sx + ts * 0.7, sy + ts * 0.74);
-            ctx.fillStyle = PAL.temple;
-            tri(sx + ts * 0.38, sy + ts * 0.74, sx + c - flick, sy + ts * 0.42, sx + ts * 0.62, sy + ts * 0.74);
+        case 'T': {
+            const tall = 0.8 + (h % 3) * 0.15;
+            part('bark', x, 0, z, 0.3, tall, 0.3);
+            part('leaves', x, tall - 0.1, z, 1, 0.8, 1);
+            part('leaves', x, tall + 0.7, z, 0.6, 0.45, 0.6);
             break;
         }
+        case 'c':
+            part('cactus', x, 0, z, 0.3, 1.1, 0.3);
+            part('cactus', x - 0.25, 0.45, z, 0.2, 0.14, 0.16);
+            part('cactus', x - 0.3, 0.45, z, 0.12, 0.4, 0.14);
+            part('cactus', x + 0.25, 0.6, z, 0.2, 0.14, 0.16);
+            part('cactus', x + 0.3, 0.6, z, 0.12, 0.35, 0.14);
+            break;
+        case 'M': {
+            part('stone', x, 0, z, 1, 1, 1);
+            const extra = h % 3;
+            part('stone', x + (h % 2 ? 0.08 : -0.08), 1, z, 0.8, 0.6 + extra * 0.3, 0.8);
+            part('snow', x, 1.6 + extra * 0.3, z, 0.55, 0.35, 0.55);
+            break;
+        }
+        case 'H':
+            part('mud', x, 0, z, 0.9, 0.8, 0.9);
+            part('thatch', x, 0.8, z, 1.05, 0.2, 1.05);
+            part('thatch', x, 1.0, z, 0.75, 0.2, 0.75);
+            part('thatch', x, 1.2, z, 0.42, 0.2, 0.42);
+            part('door', x, 0, z + 0.45, 0.26, 0.52, 0.04);
+            break;
+        case 'K':
+            part('sandstone', x, 0, z, 0.95, 0.45, 0.95);
+            part('saffron', x, 0.45, z, 0.72, 0.45, 0.72);
+            part('saffron', x, 0.9, z, 0.52, 0.42, 0.52);
+            part('saffron', x, 1.32, z, 0.32, 0.38, 0.32);
+            part('gold', x, 1.7, z, 0.08, 0.45, 0.08);
+            part('gold', x + 0.16, 1.98, z, 0.26, 0.14, 0.03);
+            part('door', x, 0, z + 0.48, 0.24, 0.4, 0.04);
+            break;
+        case 'w':
+            part('stone', x, 0, z - 0.3, 0.75, 0.4, 0.15);
+            part('stone', x, 0, z + 0.3, 0.75, 0.4, 0.15);
+            part('stone', x - 0.3, 0, z, 0.15, 0.4, 0.45);
+            part('stone', x + 0.3, 0, z, 0.15, 0.4, 0.45);
+            part('water', x, 0, z, 0.45, 0.3, 0.45);
+            part('bark', x - 0.3, 0.4, z, 0.06, 0.5, 0.06);
+            part('bark', x + 0.3, 0.4, z, 0.06, 0.5, 0.06);
+            part('bark', x, 0.85, z, 0.66, 0.06, 0.06);
+            break;
+        case 'W':
+            part('sandstone', x, 0, z, 1, 1.3, 1);
+            part('sandstone', x - 0.3, 1.3, z - 0.3, 0.32, 0.25, 0.32);
+            part('sandstone', x + 0.3, 1.3, z + 0.3, 0.32, 0.25, 0.32);
+            break;
+        case 'R':
+            part('stone', x - 0.15, 0, z + 0.1, 0.6, 0.55, 0.6);
+            part('stoneDark', x + 0.2, 0, z - 0.15, 0.5, 0.45, 0.5);
+            part('stone', x + 0.05, 0.45, z, 0.4, 0.3, 0.4);
+            break;
+        case 'C':
+            part('stoneDark', x, 0, z, 1, 1.7, 1);
+            part('black', x, 0, z + 0.47, 0.6, 1.0, 0.08);
+            break;
+        case 'A':
+            part('tent', x, 0, z, 0.95, 0.3, 0.95);
+            part('tent', x, 0.3, z, 0.72, 0.3, 0.72);
+            part('tent', x, 0.6, z, 0.48, 0.3, 0.48);
+            part('tent', x, 0.9, z, 0.24, 0.25, 0.24);
+            part('black', x, 0, z + 0.48, 0.24, 0.4, 0.03);
+            break;
+        case 'F':
+            part('bark', x, 0, z, 0.65, 0.12, 0.16);
+            part('bark', x, 0.06, z, 0.16, 0.12, 0.65);
+            part('stone', x - 0.35, 0, z, 0.12, 0.12, 0.12);
+            part('stone', x + 0.35, 0, z, 0.12, 0.12, 0.12);
+            flames.push([x, z]);
+            break;
         case 'B':
-            ctx.fillStyle = PAL.plank;
-            ctx.fillRect(sx, sy + ts * 0.12, ts * 0.3, ts * 0.76);
-            ctx.save();
-            ctx.translate(sx + ts * 0.7, sy + c);
-            ctx.rotate(0.5);
-            ctx.fillRect(-ts * 0.12, -ts * 0.3, ts * 0.24, ts * 0.6);
-            ctx.restore();
+            part('plank', x - 0.3, -0.25, z, 0.35, 0.1, 0.8);
+            part('plank', x + 0.25, -0.3, z + 0.12, 0.3, 0.1, 0.45);
             break;
         default:
             break;
     }
 }
 
-function circle(x, y, r) {
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.fill();
+// During a battle, tall scenery between the camera and the fighters is left out so the fight stays visible.
+function hiddenForBattle(o, x, y) {
+    const c = battleClearing;
+    if (!c || !'TMcHAW'.includes(o)) return false;
+    return y >= c.z - 0.5 && Math.abs(x - c.x) <= c.r && y - c.z <= c.r + 1;
 }
 
-function tri(x1, y1, x2, y2, x3, y3) {
-    ctx.beginPath();
-    ctx.moveTo(x1, y1);
-    ctx.lineTo(x2, y2);
-    ctx.lineTo(x3, y3);
-    ctx.closePath();
-    ctx.fill();
-}
-
-function roundRect(x, y, w, h, r) {
-    ctx.beginPath();
-    ctx.roundRect(x, y, w, h, r);
-    ctx.fill();
-}
-
-function drawSprite(icon, sx, sy, ring, scale = 0.78) {
-    const c = ts / 2;
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
-    ctx.beginPath();
-    ctx.ellipse(sx + c, sy + ts * 0.86, ts * 0.3, ts * 0.1, 0, 0, Math.PI * 2);
-    ctx.fill();
-    if (ring) {
-        ctx.strokeStyle = ring;
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.ellipse(sx + c, sy + ts * 0.86, ts * 0.36, ts * 0.13, 0, 0, Math.PI * 2);
-        ctx.stroke();
+function rebuildWorld() {
+    worldDirty = false;
+    if (worldGroup) {
+        scene.remove(worldGroup);
+        worldGroup.children.forEach(m => { if (m.dispose) m.dispose(); });
     }
-    // Colour emoji take their opacity from the fill style, so reset it to opaque.
-    ctx.fillStyle = '#000';
-    ctx.font = `${Math.round(ts * scale)}px ${EMOJI_FONT}`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(icon, sx + c, sy + ts * 0.48);
-}
+    worldGroup = new THREE.Group();
+    flames = [];
+    const parts = {};
+    const part = (mat, x, y, z, sx, sy, sz) => {
+        (parts[mat] = parts[mat] || []).push([x, y + sy / 2, z, sx, sy, sz]);
+    };
 
-function hasNews(npcId) {
-    switch (npcId) {
-        case 'elder': return !flags.metElder || (flags.sardarDefeated && !flags.bridgeFixed);
-        case 'guru': return !player.skills.includes('pranayama');
-        case 'rani': return flags.bridgeFixed && (!flags.metRani || (flags.queenDefeated && !flags.passOpen));
-        default: return false;
-    }
-}
-
-function draw(t) {
-    const camX = clampCam(player.rx * ts + ts / 2 - viewW / 2, MAP_W * ts - viewW);
-    const camY = clampCam(player.ry * ts + ts / 2 - viewH / 2, MAP_H * ts - viewH);
-
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, viewW, viewH);
-
-    const x0 = Math.max(0, Math.floor(camX / ts));
-    const y0 = Math.max(0, Math.floor(camY / ts));
-    const x1 = Math.min(MAP_W - 1, Math.ceil((camX + viewW) / ts));
-    const y1 = Math.min(MAP_H - 1, Math.ceil((camY + viewH) / ts));
-
-    for (let y = y0; y <= y1; y++) {
-        for (let x = x0; x <= x1; x++) {
-            const sx = Math.floor(x * ts - camX);
-            const sy = Math.floor(y * ts - camY);
-            drawGround(ground[idx(x, y)], x, y, sx, sy, t);
-        }
-    }
-    for (let y = y0; y <= y1; y++) {
-        for (let x = x0; x <= x1; x++) {
-            const o = objects[idx(x, y)];
-            if (o) drawObject(o, x, y, Math.floor(x * ts - camX), Math.floor(y * ts - camY), t);
-        }
-    }
-
-    const drawables = entities.filter(e => e.rx >= x0 - 1 && e.rx <= x1 + 1 && e.ry >= y0 - 1 && e.ry <= y1 + 1);
-    drawables.push({ hero: true, rx: player.rx, ry: player.ry });
-    drawables.sort((a, b) => a.ry - b.ry);
-    for (const e of drawables) {
-        const sx = e.rx * ts - camX;
-        const sy = e.ry * ts - camY;
-        if (e.hero) {
-            drawSprite('🧑🏽', sx, sy, '#f29a2e');
-        } else if (e.npc) {
-            drawSprite(e.icon, sx, sy, null);
-            if (hasNews(e.npc)) {
-                const bob = Math.sin(t / 250) * 3;
-                ctx.font = `bold ${Math.round(ts * 0.45)}px system-ui, sans-serif`;
-                ctx.fillStyle = '#f2c230';
-                ctx.strokeStyle = '#1a1322';
-                ctx.lineWidth = 3;
-                ctx.strokeText('!', sx + ts / 2, sy - ts * 0.08 + bob);
-                ctx.fillText('!', sx + ts / 2, sy - ts * 0.08 + bob);
+    for (let y = 0; y < MAP_H; y++) {
+        for (let x = 0; x < MAP_W; x++) {
+            const g = ground[idx(x, y)];
+            const mat = { '.': 'grass', f: 'forestGrass', s: 'sand', n: 'snow', p: 'path' }[g];
+            if (mat) {
+                part(mat, x, -1, y, 1, 1, 1);
+            } else {
+                part('riverbed', x, -1.2, y, 1, 0.2, 1);
+                part('water', x, -1, y, 1, 0.8, 1);
+                if (g === '=') {
+                    part('plank', x, -0.12, y, 1, 0.12, 0.9);
+                    part('bark', x, 0, y - 0.42, 1, 0.3, 0.06);
+                    part('bark', x, 0, y + 0.42, 1, 0.3, 0.06);
+                }
             }
-        } else {
-            const def = ENEMIES[e.kind];
-            const pulse = e.boss ? `rgba(242, 154, 46, ${0.6 + 0.4 * Math.sin(t / 300)})` : 'rgba(217, 68, 43, 0.85)';
-            drawSprite(def.icon, sx, sy, pulse, e.boss ? 0.95 : 0.74);
+            const o = objects[idx(x, y)];
+            if (o && !hiddenForBattle(o, x, y)) addObject(part, o, x, y);
         }
+    }
+
+    const m = new THREE.Matrix4();
+    for (const [mat, list] of Object.entries(parts)) {
+        const mesh = new THREE.InstancedMesh(BOX, MATS[mat], list.length);
+        list.forEach(([x, y, z, sx, sy, sz], i) => {
+            m.makeScale(sx, sy, sz);
+            m.setPosition(x, y, z);
+            mesh.setMatrixAt(i, m);
+        });
+        mesh.instanceMatrix.needsUpdate = true;
+        worldGroup.add(mesh);
+    }
+
+    flames = flames.map(([x, z]) => {
+        const outer = new THREE.Mesh(BOX, MATS.flame);
+        const inner = new THREE.Mesh(BOX, MATS.flameCore);
+        outer.position.set(x, 0.3, z);
+        inner.position.set(x, 0.25, z);
+        worldGroup.add(outer, inner);
+        return { outer, inner, seed: x * 3.1 };
+    });
+    scene.add(worldGroup);
+}
+
+// ---------- Blocky characters ----------
+
+function lambert(color, emissive = '#000000') {
+    return new THREE.MeshLambertMaterial({ color, emissive });
+}
+
+function box(parent, mat, w, h, d, x, y, z) {
+    const mesh = new THREE.Mesh(BOX, mat);
+    mesh.scale.set(w, h, d);
+    mesh.position.set(x, y + h / 2, z);
+    parent.add(mesh);
+    return mesh;
+}
+
+// A limb hangs from a pivot at its joint so it can swing.
+function limb(parent, mat, w, h, d, x, y, z) {
+    const pivot = new THREE.Group();
+    pivot.position.set(x, y, z);
+    const mesh = new THREE.Mesh(BOX, mat);
+    mesh.scale.set(w, h, d);
+    mesh.position.y = -h / 2;
+    pivot.add(mesh);
+    parent.add(pivot);
+    return pivot;
+}
+
+function humanoid(o) {
+    const g = new THREE.Group();
+    const skin = lambert(o.skin);
+    const shirt = lambert(o.shirt);
+    const pants = lambert(o.pants);
+    const legL = limb(g, pants, 0.17, 0.5, 0.17, -0.1, 0.5, 0);
+    const legR = limb(g, pants, 0.17, 0.5, 0.17, 0.1, 0.5, 0);
+    box(g, shirt, 0.44, 0.5, 0.24, 0, 0.5, 0);
+    if (o.robe) box(g, shirt, 0.46, 0.32, 0.28, 0, 0.2, 0);
+    if (o.sash) box(g, lambert(o.sash), 0.45, 0.08, 0.25, 0, 0.62, 0);
+    const armMat = o.bareArms ? skin : shirt;
+    const armL = limb(g, armMat, 0.13, 0.46, 0.13, -0.29, 0.98, 0);
+    const armR = limb(g, armMat, 0.13, 0.46, 0.13, 0.29, 0.98, 0);
+
+    const head = new THREE.Group();
+    head.position.y = 1.0;
+    g.add(head);
+    box(head, skin, 0.36, 0.36, 0.36, 0, 0, 0);
+    const eye = o.glow ? lambert('#ffd23a', '#ffb000') : lambert('#1a1010');
+    box(head, eye, 0.06, 0.06, 0.02, -0.08, 0.17, 0.18);
+    box(head, eye, 0.06, 0.06, 0.02, 0.08, 0.17, 0.18);
+    if (o.hair) {
+        const hair = lambert(o.hair);
+        box(head, hair, 0.38, 0.1, 0.38, 0, 0.3, 0);
+        box(head, hair, 0.38, o.longHair ? 0.5 : 0.24, 0.06, 0, o.longHair ? -0.2 : 0.08, -0.17);
+    }
+    if (o.turban) {
+        const t = lambert(o.turban);
+        box(head, t, 0.4, 0.14, 0.4, 0, 0.27, 0);
+        box(head, t, 0.3, 0.1, 0.3, 0, 0.41, 0);
+    }
+    if (o.hijab) {
+        const hj = lambert(o.hijab);
+        box(head, hj, 0.42, 0.1, 0.42, 0, 0.32, 0);
+        box(head, hj, 0.05, 0.4, 0.4, -0.2, -0.04, -0.01);
+        box(head, hj, 0.05, 0.4, 0.4, 0.2, -0.04, -0.01);
+        box(head, hj, 0.42, 0.44, 0.05, 0, -0.08, -0.2);
+    }
+    if (o.beard) box(head, lambert(o.beard), 0.32, o.longBeard ? 0.26 : 0.13, 0.06, 0, o.longBeard ? -0.14 : 0, 0.19);
+    if (o.mustache) box(head, lambert(o.mustache), 0.24, 0.05, 0.03, 0, 0.09, 0.195);
+    if (o.mask) box(head, lambert(o.mask), 0.38, 0.15, 0.38, 0, 0, 0);
+    if (o.crown) {
+        const gold = lambert('#f2c230', '#3a2a00');
+        box(head, gold, 0.38, 0.08, 0.38, 0, 0.34, 0);
+        for (const cx of [-0.14, 0, 0.14]) box(head, gold, 0.06, 0.1, 0.06, cx, 0.42, 0.16);
+    }
+    if (o.horns) {
+        const horn = lambert('#efe2c4');
+        for (const s of [-1, 1]) {
+            const hm = box(head, horn, 0.07, 0.2, 0.07, 0.14 * s, 0.33, 0);
+            hm.rotation.z = -0.4 * s;
+        }
+    }
+    g.scale.setScalar(o.scale || 1);
+    return { body: g, limbs: [[legL, 0, 0.8], [legR, Math.PI, 0.8], [armL, Math.PI, 0.7], [armR, 0, 0.7]], armR };
+}
+
+function quadruped(o) {
+    const g = new THREE.Group();
+    const bodyMat = o.pattern ? texMat(o.color, { pattern: o.pattern }) : lambert(o.color);
+    const legMat = lambert(o.leg || o.color);
+    const [len, h, w] = o.size;
+    const legH = o.legH;
+    box(g, bodyMat, w, h, len, 0, legH, 0);
+    const head = box(g, bodyMat, o.head, o.head, o.head, 0, legH + h * 0.45, len / 2 + o.head / 2 - 0.06);
+    const eye = lambert('#1a1010');
+    box(g, eye, 0.04, 0.05, 0.02, -o.head * 0.25, legH + h * 0.45 + o.head * 0.62, len / 2 + o.head - 0.05);
+    box(g, eye, 0.04, 0.05, 0.02, o.head * 0.25, legH + h * 0.45 + o.head * 0.62, len / 2 + o.head - 0.05);
+    if (o.snout) box(g, lambert(o.snout), o.head * 0.55, o.head * 0.4, 0.12, 0, legH + h * 0.45 + 0.02, len / 2 + o.head - 0.02);
+    if (o.tusks) {
+        for (const s of [-1, 1]) box(g, lambert('#f4efe2'), 0.04, 0.12, 0.04, s * o.head * 0.3, legH + h * 0.45, len / 2 + o.head);
+    }
+    if (o.ears) {
+        for (const s of [-1, 1]) box(g, bodyMat, 0.07, 0.12, 0.05, s * o.head * 0.3, legH + h * 0.45 + o.head, len / 2 + o.head / 2);
+    }
+    if (o.tail) {
+        const tail = box(g, legMat, 0.06, 0.06, o.tail, 0, legH + h * 0.75, -len / 2 - o.tail / 2);
+        tail.rotation.x = 0.4;
+    }
+    const legs = [];
+    for (const [sx, sz, ph] of [[-1, 1, 0], [1, 1, Math.PI], [-1, -1, Math.PI], [1, -1, 0]]) {
+        const leg = limb(g, legMat, 0.12, legH, 0.12, sx * (w / 2 - 0.07), legH, sz * (len / 2 - 0.1));
+        legs.push([leg, ph, 0.6]);
+    }
+    head.userData.isHead = true;
+    g.scale.setScalar(o.scale || 1);
+    return { body: g, limbs: legs };
+}
+
+function cobra(scale = 1) {
+    const g = new THREE.Group();
+    const skin = texMat('#3f6b2a', { pattern: (x, y) => ((x + y) % 4 === 0 ? '#c9b060' : null) });
+    box(g, skin, 0.55, 0.1, 0.55, 0, 0, 0);
+    box(g, skin, 0.38, 0.1, 0.38, 0, 0.1, 0);
+    const neck = new THREE.Group();
+    neck.position.y = 0.2;
+    g.add(neck);
+    box(neck, skin, 0.12, 0.55, 0.12, 0, 0, 0.05);
+    box(neck, skin, 0.36, 0.3, 0.06, 0, 0.35, 0.02);
+    box(neck, skin, 0.16, 0.12, 0.2, 0, 0.55, 0.1);
+    box(neck, lambert('#e8d36a', '#5a4a00'), 0.03, 0.03, 0.02, -0.05, 0.62, 0.21);
+    box(neck, lambert('#e8d36a', '#5a4a00'), 0.03, 0.03, 0.02, 0.05, 0.62, 0.21);
+    g.scale.setScalar(scale);
+    return { body: g, limbs: [], sway: neck };
+}
+
+function scorpion(color, scale = 1) {
+    const g = new THREE.Group();
+    const shell = texMat(color, { vary: 0.1 });
+    const dark = lambert(shade(color, -0.15));
+    box(g, shell, 0.42, 0.14, 0.6, 0, 0.08, 0);
+    box(g, shell, 0.26, 0.12, 0.18, 0, 0.1, 0.36);
+    const legs = [];
+    for (const s of [-1, 1]) {
+        box(g, dark, 0.08, 0.06, 0.3, s * 0.2, 0.12, 0.56);
+        box(g, shell, 0.16, 0.08, 0.14, s * 0.22, 0.1, 0.74);
+        for (const z of [-0.15, 0.05, 0.22]) {
+            const leg = limb(g, dark, 0.22, 0.05, 0.05, s * 0.3, 0.12, z);
+            leg.rotation.z = s * 0.4;
+            legs.push([leg, z * 10, 0.25]);
+        }
+    }
+    const tail = new THREE.Group();
+    tail.position.set(0, 0.15, -0.3);
+    g.add(tail);
+    box(tail, shell, 0.14, 0.14, 0.2, 0, 0, -0.08);
+    box(tail, shell, 0.12, 0.25, 0.12, 0, 0.1, -0.18);
+    box(tail, shell, 0.11, 0.12, 0.2, 0, 0.35, -0.08);
+    box(tail, lambert('#2a0f0f', '#4a0000'), 0.08, 0.14, 0.08, 0, 0.3, 0.06);
+    g.scale.setScalar(scale);
+    return { body: g, limbs: legs, tailBob: tail };
+}
+
+function raider() {
+    const horse = quadruped({ color: '#6b4426', leg: '#4a2e18', size: [1.0, 0.45, 0.36], legH: 0.5, head: 0.28, tail: 0.3, ears: true });
+    const rider = humanoid({ skin: '#a86d43', shirt: '#2c3e6b', pants: '#2c3e6b', turban: '#d9442b', mustache: '#1a1010', scale: 0.75 });
+    rider.body.position.set(0, 0.62, -0.05);
+    rider.limbs.forEach(([leg], i) => { if (i < 2) leg.rotation.x = -1.2; });
+    horse.body.add(rider.body);
+    return { body: horse.body, limbs: horse.limbs, armR: rider.armR };
+}
+
+const MODEL_BUILDERS = {
+    hero: () => humanoid({ skin: '#b9794c', shirt: '#f29a2e', pants: '#f3ead6', hair: '#1d1410', sash: '#d9442b' }),
+    elder: () => humanoid({ skin: '#a8714a', shirt: '#f3ead6', pants: '#f3ead6', turban: '#f3ead6', beard: '#e8e4dc', longBeard: true }),
+    vaidya: () => humanoid({ skin: '#a8714a', shirt: '#2e8b57', pants: '#2e8b57', robe: true, hair: '#9a9a9a', longHair: true, sash: '#f2c230' }),
+    merchant: () => humanoid({ skin: '#b07a50', shirt: '#e6b422', pants: '#f3ead6', turban: '#c0392b', mustache: '#1a1010' }),
+    child: () => humanoid({ skin: '#b9794c', shirt: '#3f8fd9', pants: '#5a3d22', hair: '#1d1410', scale: 0.72 }),
+    guru: () => humanoid({ skin: '#a8714a', shirt: '#e07b2a', pants: '#e07b2a', robe: true, beard: '#ecebe6', longBeard: true, bareArms: true }),
+    rani: () => humanoid({ skin: '#c48a5e', shirt: '#a3192c', pants: '#a3192c', robe: true, hair: '#1d1410', longHair: true, crown: true, sash: '#f2c230' }),
+    trader: () => humanoid({ skin: '#b98258', shirt: '#1f8a8a', pants: '#2b2b44', hijab: '#145f5f' }),
+    dacoit: () => humanoid({ skin: '#9a6440', shirt: '#26201c', pants: '#26201c', turban: '#26201c', mask: '#a3192c' }),
+    sardar: () => humanoid({ skin: '#9a6440', shirt: '#3a1414', pants: '#26201c', turban: '#7a1f1f', beard: '#1a1010', mustache: '#1a1010', sash: '#f2c230', scale: 1.35 }),
+    scout: () => humanoid({ skin: '#8e2a2a', shirt: '#3a1a2a', pants: '#3a1a2a', horns: true, glow: true, bareArms: true, scale: 1.15 }),
+    kaal: () => humanoid({ skin: '#4a1424', shirt: '#1c0c14', pants: '#1c0c14', horns: true, glow: true, bareArms: true, crown: true, scale: 2.1 }),
+    boar: () => quadruped({ color: '#6b4a3a', size: [0.75, 0.4, 0.38], legH: 0.2, head: 0.3, snout: '#c9928a', tusks: true, ears: true, tail: 0.12 }),
+    jackal: () => quadruped({ color: '#a8875e', leg: '#8a6c48', size: [0.7, 0.3, 0.26], legH: 0.32, head: 0.24, ears: true, tail: 0.3 }),
+    tiger: () => quadruped({ color: '#e8862a', leg: '#e8862a', size: [1.0, 0.42, 0.38], legH: 0.32, head: 0.34, ears: true, tail: 0.5, snout: '#f6ead2', pattern: (x) => (x % 4 === 0 ? '#2a1a10' : null) }),
+    leopard: () => quadruped({ color: '#e6e1d6', size: [0.95, 0.38, 0.34], legH: 0.34, head: 0.3, ears: true, tail: 0.6, pattern: (x, y, r) => (r() < 0.14 ? '#4a4038' : null) }),
+    cobra: () => cobra(),
+    scorpion: () => scorpion('#7a4a2a'),
+    queen: () => scorpion('#5a1a2a', 2.1),
+    raider,
+};
+
+function weaponMesh(key) {
+    const g = new THREE.Group();
+    if (key === 'lathi') {
+        box(g, lambert('#c9a46a'), 0.05, 0.95, 0.05, 0, -1.0, 0.08);
+    } else {
+        const wide = key === 'khanda';
+        box(g, lambert('#f2c230'), 0.14, 0.05, 0.08, 0, -0.5, 0.08);
+        box(g, lambert('#dfe6ea', '#20262a'), wide ? 0.09 : 0.05, 0.45, 0.03, 0, -0.95, 0.08);
+    }
+    return g;
+}
+
+function makeModel(e) {
+    const key = e.hero ? 'hero' : e.npc || e.kind;
+    const built = MODEL_BUILDERS[key]();
+    const root = new THREE.Group();
+    const shadow = new THREE.Mesh(
+        new THREE.CircleGeometry(0.38, 18),
+        new THREE.MeshBasicMaterial({ color: '#000000', transparent: true, opacity: 0.28, depthWrite: false }));
+    shadow.rotation.x = -Math.PI / 2;
+    shadow.position.y = 0.01;
+    shadow.scale.setScalar(e.boss ? 1.8 : 1);
+    root.add(shadow);
+
+    let ring = null;
+    const ringColor = e.hero ? '#f29a2e' : e.boss ? '#f2c230' : e.kind ? '#d9442b' : null;
+    if (ringColor) {
+        ring = new THREE.Mesh(
+            new THREE.RingGeometry(0.42, 0.5, 28),
+            new THREE.MeshBasicMaterial({ color: ringColor, transparent: true, opacity: 0.85, depthWrite: false, side: THREE.DoubleSide }));
+        ring.rotation.x = -Math.PI / 2;
+        ring.position.y = 0.02;
+        ring.scale.setScalar(e.boss ? 1.8 : 1);
+        root.add(ring);
+    }
+
+    let marker = null;
+    if (e.npc) {
+        marker = new THREE.Sprite(new THREE.SpriteMaterial({ map: markerTexture(), depthTest: false }));
+        marker.scale.set(0.45, 0.45, 1);
+        marker.position.y = 1.85;
+        root.add(marker);
+    }
+
+    root.add(built.body);
+    const mats = [];
+    built.body.traverse(o => { if (o.isMesh) mats.push(o.material); });
+    return { root, ring, marker, mats, facing: 0, walk: 0, weapon: null, ...built };
+}
+
+let markerTex = null;
+function markerTexture() {
+    if (markerTex) return markerTex;
+    const c = document.createElement('canvas');
+    c.width = c.height = 64;
+    const g = c.getContext('2d');
+    g.font = 'bold 56px system-ui, sans-serif';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.lineWidth = 8;
+    g.strokeStyle = '#1a1322';
+    g.strokeText('!', 32, 34);
+    g.fillStyle = '#f2c230';
+    g.fillText('!', 32, 34);
+    markerTex = new THREE.CanvasTexture(c);
+    return markerTex;
+}
+
+function clearModels() {
+    for (const m of models.values()) scene.remove(m.root);
+    models.clear();
+}
+
+function turnToward(m, target, dt) {
+    let d = target - m.body.rotation.y;
+    d = Math.atan2(Math.sin(d), Math.cos(d));
+    m.body.rotation.y += d * Math.min(1, dt * 12);
+}
+
+function animateModel(m, e, now, dt) {
+    const dx = e.x - e.rx;
+    const dz = e.y - e.ry;
+    const moving = Math.abs(dx) + Math.abs(dz) > 0.01;
+    if (moving) m.facing = Math.atan2(dx, dz);
+    turnToward(m, m.facing, dt);
+    m.walk += ((moving ? 1 : 0) - m.walk) * Math.min(1, dt * 10);
+    for (const [pivot, phase, amp] of m.limbs) pivot.rotation.x = Math.sin(now / 90 + phase) * amp * m.walk;
+
+    let ox = 0;
+    let oz = 0;
+    if (m.lunge) {
+        const p = (now - m.lunge.start) / 320;
+        if (p >= 1) m.lunge = null;
+        else { const k = Math.sin(p * Math.PI) * 0.45; ox = m.lunge.dx * k; oz = m.lunge.dz * k; }
+    }
+    m.root.position.set(e.rx + ox, 0, e.ry + oz);
+    m.body.position.y = m.walk > 0.1 ? Math.abs(Math.sin(now / 90)) * 0.06 * m.walk : 0;
+
+    if (m.sway) m.sway.rotation.z = Math.sin(now / 400) * 0.15;
+    if (m.tailBob) m.tailBob.rotation.x = Math.sin(now / 250) * 0.2;
+    if (m.ring && e.boss) m.ring.material.opacity = 0.55 + 0.4 * Math.sin(now / 300);
+    if (m.marker) {
+        m.marker.visible = hasNews(e.npc);
+        m.marker.position.y = 1.85 + Math.sin(now / 250) * 0.08;
+    }
+
+    const flashing = now < (m.flashUntil || 0);
+    if (flashing !== !!m.flashed) {
+        m.flashed = flashing;
+        for (const mat of m.mats) if (mat.emissive) mat.emissive.set(flashing ? '#c0201a' : (mat.userData.baseEmissive || '#000000'));
     }
 }
 
-function clampCam(v, max) {
-    return max <= 0 ? max / 2 : Math.max(0, Math.min(max, v));
+function syncModels(now, dt) {
+    const alive = new Set(entities);
+    for (const e of entities) {
+        if (!models.has(e)) {
+            const m = makeModel(e);
+            m.facing = e.npc ? 0 : Math.random() * Math.PI * 2;
+            m.body.rotation.y = m.facing;
+            for (const mat of m.mats) if (mat.emissive) mat.userData.baseEmissive = `#${mat.emissive.getHexString()}`;
+            models.set(e, m);
+            scene.add(m.root);
+        }
+    }
+    for (const [e, m] of models) {
+        if (alive.has(e)) { animateModel(m, e, now, dt); continue; }
+        if (!m.dyingAt) m.dyingAt = now;
+        const p = (now - m.dyingAt) / 650;
+        m.body.rotation.z = Math.min(1, p * 1.5) * Math.PI / 2;
+        m.root.position.y = -Math.max(0, p - 0.5) * 1.2;
+        if (p >= 1) { scene.remove(m.root); models.delete(e); }
+    }
+
+    if (heroModel.weapon !== player.weapon) {
+        if (heroModel.weaponMesh) heroModel.armR.remove(heroModel.weaponMesh);
+        heroModel.weaponMesh = weaponMesh(player.weapon);
+        heroModel.armR.add(heroModel.weaponMesh);
+        heroModel.weapon = player.weapon;
+    }
+    animateModel(heroModel, player, now, dt);
+}
+
+// ---------- Battle effects ----------
+
+function facePair(ent) {
+    const fm = models.get(ent);
+    heroModel.facing = Math.atan2(ent.x - player.x, ent.y - player.y);
+    if (fm) fm.facing = Math.atan2(player.x - ent.x, player.y - ent.y);
+}
+
+function fxAttack(heroAttacks, text, color) {
+    const b = ui.battle;
+    if (!b || !heroModel) return;
+    const foeModel = models.get(b.ent);
+    const attacker = heroAttacks ? heroModel : foeModel;
+    const target = heroAttacks ? foeModel : heroModel;
+    const from = heroAttacks ? player : b.ent;
+    const to = heroAttacks ? b.ent : player;
+    const now = performance.now();
+    if (attacker) attacker.lunge = { start: now, dx: Math.sign(to.x - from.x), dz: Math.sign(to.y - from.y) };
+    if (target) setTimeout(() => { target.flashUntil = performance.now() + 260; }, 140);
+    if (text) floatText(to, text, color, heroAttacks ? (b.def.boss ? 2.6 : 1.4) : 1.6);
+}
+
+function floatText(e, text, color, height) {
+    if (!camera) return;
+    const v = new THREE.Vector3(e.rx, height, e.ry).project(camera);
+    const el = document.createElement('div');
+    el.className = 'dmg';
+    el.textContent = text;
+    el.style.color = color;
+    el.style.left = `${((v.x + 1) / 2) * 100}%`;
+    el.style.top = `${((1 - v.y) / 2) * 100}%`;
+    $('frame').appendChild(el);
+    setTimeout(() => el.remove(), 1000);
+}
+
+// ---------- Camera and frame ----------
+
+const camPos = { x: START.x, y: 8, z: START.y + 7 };
+const camLook = { x: START.x, y: 0, z: START.y };
+
+function updateCamera(dt) {
+    const far = viewW / viewH < 0.9 ? 1.5 : 1;
+    let tx = player.rx;
+    let tz = player.ry;
+    let off = [0, 8.6 * far, 5.4 * far];
+    if (ui.battle) {
+        const e = ui.battle.ent;
+        tx = (player.rx + e.rx) / 2;
+        tz = (player.ry + e.ry) / 2;
+        const big = ui.battle.def.boss ? 1.5 : 1;
+        off = [1.2 * big, 3.4 * far * big, 4.2 * far * big];
+    }
+    const k = 1 - Math.exp(-dt * 5);
+    camPos.x += (tx + off[0] - camPos.x) * k;
+    camPos.y += (off[1] - camPos.y) * k;
+    camPos.z += (tz + off[2] - camPos.z) * k;
+    camLook.x += (tx - camLook.x) * k;
+    camLook.y += ((ui.battle ? 0.6 : 0.3) - camLook.y) * k;
+    camLook.z += (tz - camLook.z) * k;
+    camera.position.set(camPos.x, camPos.y, camPos.z);
+    camera.lookAt(camLook.x, camLook.y, camLook.z);
+}
+
+function resize() {
+    if (!renderer) return;
+    const rect = canvas.getBoundingClientRect();
+    viewW = Math.max(1, rect.width);
+    viewH = Math.max(1, rect.height);
+    renderer.setSize(viewW, viewH, false);
+    camera.aspect = viewW / viewH;
+    camera.updateProjectionMatrix();
+}
+
+function render3d(now, dt) {
+    if (!renderer) return;
+    if (worldDirty) rebuildWorld();
+    waterTex.offset.x = (now / 6000) % 1;
+    waterTex.offset.y = (now / 9000) % 1;
+    for (const f of flames) {
+        const s = 1 + Math.sin(now / 90 + f.seed) * 0.15;
+        f.outer.scale.set(0.3 * s, 0.4 * s, 0.3 * s);
+        f.inner.scale.set(0.15, 0.25 * s, 0.15);
+        f.outer.rotation.y = now / 400;
+    }
+    syncModels(now, dt);
+    updateCamera(dt);
+    renderer.render(scene, camera);
+}
+
+function init3d() {
+    if (!window.THREE) {
+        $('frame').insertAdjacentHTML('beforeend', '<p class="engine-error">The 3D engine could not load. Check your internet connection and reload the page.</p>');
+        return false;
+    }
+    renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(SKY);
+    scene.fog = new THREE.Fog(SKY, 16, 32);
+    camera = new THREE.PerspectiveCamera(45, 1, 0.1, 120);
+    scene.add(new THREE.HemisphereLight('#ffffff', '#6a5a40', 0.8));
+    const sun = new THREE.DirectionalLight('#fff1d6', 0.65);
+    sun.position.set(-0.6, 1, 0.45);
+    scene.add(sun);
+    BOX = new THREE.BoxGeometry(1, 1, 1);
+    makeMaterials();
+    heroModel = makeModel({ hero: true });
+    scene.add(heroModel.root);
+    resize();
+    return true;
 }
 
 function approach(e, speed, dt) {
@@ -689,7 +1079,7 @@ function frame(now) {
     hudClock += dt;
     if (hudClock > 0.25) { hudClock = 0; renderHud(); }
 
-    draw(now);
+    render3d(now, dt);
     requestAnimationFrame(frame);
 }
 
@@ -774,6 +1164,15 @@ function advanceDialog() {
 
 function lines(name, ...texts) {
     return texts.map(text => ({ name, text }));
+}
+
+function hasNews(npcId) {
+    switch (npcId) {
+        case 'elder': return !flags.metElder || (flags.sardarDefeated && !flags.bridgeFixed);
+        case 'guru': return !player.skills.includes('pranayama');
+        case 'rani': return flags.bridgeFixed && (!flags.metRani || (flags.queenDefeated && !flags.passOpen));
+        default: return false;
+    }
 }
 
 function talkTo(id) {
@@ -907,6 +1306,10 @@ function startBattle(ent) {
     held.clear();
     $('battle-log').innerHTML = '';
     $('foe').classList.toggle('boss', !!def.boss);
+    $('frame').classList.add('in-battle');
+    facePair(ent);
+    battleClearing = { x: (player.x + ent.x) / 2, z: Math.max(player.y, ent.y), r: def.boss ? 3 : 2 };
+    worldDirty = true;
     blog(def.boss ? `${def.name} stands before you!` : `A ${def.name} attacks!`);
     $('battle').hidden = false;
     renderBattle();
@@ -930,12 +1333,9 @@ function renderBattle() {
     const b = ui.battle;
     if (!b) return;
     const s = stats();
-    $('foe-icon').textContent = b.def.icon;
     $('foe-name').textContent = b.def.name;
     setMeter('foe-hp-bar', 'foe-hp', b.hp, b.maxHp);
-    $('battle-level').textContent = `Lv ${player.lvl}`;
-    setMeter('battle-hp-bar', 'battle-hp', player.hp, s.maxHp);
-    setMeter('battle-prana-bar', 'battle-prana', player.prana, s.maxPrana);
+    renderHud();
 
     const box = $('battle-actions');
     if (b.done) {
@@ -976,6 +1376,7 @@ function battleAction(act, arg) {
         b.hp -= dmg;
         blog(`You strike the ${b.def.name} for ${dmg} damage.`);
         shake('foe');
+        fxAttack(true, `-${dmg}`, '#ffffff');
     } else if (act === 'vajra') {
         if (player.prana < SKILLS.vajra.cost) return;
         player.prana -= SKILLS.vajra.cost;
@@ -983,12 +1384,14 @@ function battleAction(act, arg) {
         b.hp -= dmg;
         blog(`Vajra Strike! Thunder cracks as you deal ${dmg} damage.`, 'gold');
         shake('foe');
+        fxAttack(true, `-${dmg}`, '#f2c230');
     } else if (act === 'pranayama') {
         if (player.prana < SKILLS.pranayama.cost) return;
         player.prana -= SKILLS.pranayama.cost;
         const before = player.hp;
         player.hp = Math.min(s.maxHp, player.hp + Math.round(s.maxHp * 0.4));
         blog(`You breathe deeply and recover ${player.hp - before} health.`, 'good');
+        floatText(player, `+${player.hp - before}`, '#8fd18a', 1.6);
     } else if (act === 'item') {
         const msg = useItem(arg);
         if (!msg) return;
@@ -1033,7 +1436,7 @@ function foeTurn() {
     const dmg = damage(b.def.atk * mult, stats().def);
     player.hp -= dmg;
     blog(mult > 1 ? `${b.def.name} unleashes a devastating blow for ${dmg} damage!` : `The ${b.def.name} hits you for ${dmg} damage.`, 'bad');
-    shake('hero-card');
+    fxAttack(false, `-${dmg}`, '#ff8a75');
     b.busy = false;
     if (player.hp <= 0) return loseBattle();
     renderBattle();
@@ -1078,6 +1481,9 @@ function endBattle() {
     const b = ui.battle;
     ui.battle = null;
     $('battle').hidden = true;
+    $('frame').classList.remove('in-battle');
+    battleClearing = null;
+    worldDirty = true;
     if (b.lost) {
         const s = stats();
         const lostGold = Math.floor(player.gold / 2);
@@ -1223,6 +1629,7 @@ function startGame(data) {
     flags = data ? data.flags : {};
     buildWorld();
     applyFlagsToMap();
+    if (renderer) clearModels();
     entities = [];
     spawnStatic();
     populate(true);
@@ -1312,7 +1719,7 @@ $('ending-close').addEventListener('click', () => {
     renderHud();
 });
 
+init3d();
 new ResizeObserver(resize).observe(canvas);
-resize();
 startGame(load());
 requestAnimationFrame(frame);
