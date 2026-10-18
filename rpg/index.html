@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Legends of Bharat</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hind:wght@400;500;600&family=Rozha+One&display=swap">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <main class="shell">
+        <header class="masthead">
+            <h1>Legends of Bharat</h1>
+            <p class="tagline">From the banks of the Ganga to the Himalayan snows</p>
+        </header>
+
+        <section class="frame" id="frame">
+            <canvas id="world" aria-label="Game world"></canvas>
+
+            <div class="hud">
+                <div class="hud-hero">
+                    <div class="hud-name">Veer <span id="hud-level">Lv 1</span></div>
+                    <div class="meter hp" title="Health"><span id="hud-hp-bar"></span><em id="hud-hp">40 / 40</em></div>
+                    <div class="meter prana" title="Prana (spiritual energy for skills)"><span id="hud-prana-bar"></span><em id="hud-prana">12 / 12</em></div>
+                </div>
+                <div class="hud-side">
+                    <div class="hud-gold" title="Gold coins"><span class="coin"></span><b id="hud-gold">20</b></div>
+                    <button id="menu-btn" class="ghost">Menu</button>
+                </div>
+            </div>
+
+            <div class="quest" id="quest"></div>
+            <div class="banner" id="banner" hidden></div>
+            <div class="toast" id="toast" hidden></div>
+
+            <div class="dpad" id="dpad" aria-label="Movement controls">
+                <button data-dir="up" aria-label="Move up">▲</button>
+                <button data-dir="left" aria-label="Move left">◀</button>
+                <button data-dir="right" aria-label="Move right">▶</button>
+                <button data-dir="down" aria-label="Move down">▼</button>
+            </div>
+
+            <div class="dialog" id="dialog" hidden>
+                <div class="dialog-name" id="dialog-name"></div>
+                <p class="dialog-text" id="dialog-text"></p>
+                <button class="dialog-next" id="dialog-next">Continue ▸</button>
+            </div>
+
+            <div class="sheet battle" id="battle" hidden>
+                <div class="battle-stage">
+                    <div class="combatant foe" id="foe">
+                        <div class="foe-icon" id="foe-icon"></div>
+                        <div class="combatant-name" id="foe-name"></div>
+                        <div class="meter hp"><span id="foe-hp-bar"></span><em id="foe-hp"></em></div>
+                    </div>
+                    <div class="combatant hero" id="hero-card">
+                        <div class="combatant-name">Veer <span id="battle-level"></span></div>
+                        <div class="meter hp"><span id="battle-hp-bar"></span><em id="battle-hp"></em></div>
+                        <div class="meter prana"><span id="battle-prana-bar"></span><em id="battle-prana"></em></div>
+                    </div>
+                </div>
+                <ol class="battle-log" id="battle-log"></ol>
+                <div class="battle-actions" id="battle-actions"></div>
+            </div>
+
+            <div class="sheet panel" id="shop" hidden>
+                <div class="panel-head">
+                    <h2 id="shop-title">Bazaar</h2>
+                    <button class="ghost" data-close="shop">Close</button>
+                </div>
+                <p class="panel-sub">Your purse: <b id="shop-gold"></b> gold</p>
+                <ul class="offers" id="shop-list"></ul>
+            </div>
+
+            <div class="sheet panel" id="menu" hidden>
+                <div class="panel-head">
+                    <h2>Veer's Satchel</h2>
+                    <button class="ghost" data-close="menu">Close</button>
+                </div>
+                <div id="menu-body"></div>
+            </div>
+
+            <div class="sheet ending" id="ending" hidden>
+                <h2>The land is at peace</h2>
+                <p id="ending-text"></p>
+                <button class="primary" id="ending-close">Keep exploring</button>
+            </div>
+        </section>
+
+        <p class="controls">Move with the arrow keys or WASD. Walk into people to talk and into enemies to fight. Space or Enter continues a conversation.</p>
+    </main>
+
+    <script src="game.js"></script>
+</body>
+</html>
