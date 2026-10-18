@@ -38,7 +38,29 @@
 
         --player: #5b93f0;
         --rival: #ff5f5f;
+        color-scheme: dark;
     }
+}
+
+:root[data-theme="dark"] {
+    --bg: #17150f;
+    --panel: #221f17;
+    --text: #efe7d6;
+    --muted: #a89a80;
+    --border: #3b3527;
+    --accent: #5b93f0;
+    --good: #6cc070;
+    --bad: #ff7a6b;
+
+    --plains: #7d9a45;
+    --forest: #2f5e26;
+    --hills: #8f764a;
+    --mountain: #67645f;
+    --water: #2f6c99;
+
+    --player: #5b93f0;
+    --rival: #ff5f5f;
+    color-scheme: dark;
 }
 
 * { box-sizing: border-box; }

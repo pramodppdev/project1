@@ -574,8 +574,19 @@ for (const id of ['resources', 'tile-panel']) {
 
 document.getElementById('end-turn').addEventListener('click', endTurn);
 document.getElementById('play-again').addEventListener('click', newGame);
-document.getElementById('new-game').addEventListener('click', () => {
-    if (state.over || confirm('Start a new game? Your current empire will be lost.')) newGame();
+// Two-step confirmation inside the page, since browser dialogs may be blocked.
+let confirmTimer = null;
+document.getElementById('new-game').addEventListener('click', ev => {
+    const btn = ev.currentTarget;
+    if (state.over || confirmTimer) {
+        clearTimeout(confirmTimer);
+        confirmTimer = null;
+        btn.textContent = 'New game';
+        newGame();
+        return;
+    }
+    btn.textContent = 'Click again to restart';
+    confirmTimer = setTimeout(() => { confirmTimer = null; btn.textContent = 'New game'; }, 3000);
 });
 
 state = load();
