@@ -98,7 +98,7 @@ function personName(rng, female) {
 
 // ---------- Generation ----------
 
-function generateWorld(seed, sizeKey = 'medium') {
+function generateWorld(seed, sizeKey = 'medium', opts = {}) {
     const size = WORLD_SIZES[sizeKey] || 96;
     MAP_W = MAP_H = size;
     const N = size * size;
@@ -203,6 +203,12 @@ function generateWorld(seed, sizeKey = 'medium') {
             if (ground[i] === 'o' || ground[i] === '~') continue;
             objects[i] = biome[i] === 'beach' || biome[i] === 'desert' ? 'k' : biome[i] === 'snow' || biome[i] === 'peak' || biome[i] === 'badlands' ? 'M' : 'T';
         }
+    }
+
+    // Strategy maps only need the land itself; the RTS game places its own bases and resources.
+    if (opts.terrainOnly) {
+        WORLD = { seed, sizeKey, size, coast, northRange, settlements: [], lairs: [], scrolls: [], home: null, rng, elev };
+        return WORLD;
     }
 
     const settlements = placeSettlements(rng, size, elev);

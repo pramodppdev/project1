@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>Age of Bharat</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hind:wght@400;500;600&family=Rozha+One&display=swap">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="game">
+        <canvas id="world" aria-label="Battlefield"></canvas>
+        <canvas id="overlay" aria-hidden="true"></canvas>
+
+        <header id="topbar">
+            <div id="resbar"></div>
+            <div id="agebox"><span id="age-name">Vedic Age</span><span id="clock">0:00</span></div>
+            <div class="top-actions">
+                <button id="btn-idle" title="Next idle villager (.)">Idle <b id="idle-n">0</b></button>
+                <button id="btn-army" title="Select all soldiers (,)">Army</button>
+                <button id="btn-pause" title="Pause (P)">Pause</button>
+            </div>
+        </header>
+
+        <ul id="messages" aria-live="polite"></ul>
+
+        <footer id="panel">
+            <div id="mini-wrap"><canvas id="minimap" width="180" height="180" aria-label="Map"></canvas></div>
+            <section id="info"></section>
+            <section id="commands"></section>
+        </footer>
+
+        <div id="hint" hidden></div>
+
+        <div id="start" class="sheet">
+            <div class="sheet-card">
+                <h1>Age of Bharat</h1>
+                <p class="lede">Gather food, wood, stone and gold. Raise a town, advance through four ages of Indian history and conquer rival kingdoms.</p>
+                <h2>Your kingdom</h2>
+                <div class="chips" id="civ-chips"></div>
+                <p class="civ-bonus" id="civ-bonus"></p>
+                <div class="row">
+                    <div>
+                        <h2>Rivals</h2>
+                        <div class="chips" id="opp-chips">
+                            <button data-opp="1" class="on">1</button><button data-opp="2">2</button><button data-opp="3">3</button>
+                        </div>
+                    </div>
+                    <div>
+                        <h2>Difficulty</h2>
+                        <div class="chips" id="diff-chips">
+                            <button data-diff="easy">Easy</button><button data-diff="normal" class="on">Normal</button><button data-diff="hard">Hard</button>
+                        </div>
+                    </div>
+                    <div>
+                        <h2>Land</h2>
+                        <div class="chips" id="size-chips">
+                            <button data-size="small">Small</button><button data-size="medium" class="on">Medium</button><button data-size="large">Large</button>
+                        </div>
+                    </div>
+                </div>
+                <h2>Map seed</h2>
+                <div class="seed-row"><input id="seed-input" inputmode="numeric" autocomplete="off" aria-label="Map seed"><button id="seed-random">New seed</button></div>
+                <div class="actions"><button id="how-btn">How to play</button><button id="start-btn" class="primary">Begin</button></div>
+            </div>
+        </div>
+
+        <div id="how" class="sheet" hidden>
+            <div class="sheet-card">
+                <h1>How to play</h1>
+                <ul class="how">
+                    <li><b>Select</b>: click a unit or building, or drag a box around your units. On touch, tap to select and use the Army / Idle buttons.</li>
+                    <li><b>Command</b>: right-click (or tap, when units are selected) on the ground to move, on trees, mines, bushes, animals or farms to gather, on your unfinished buildings to build, and on enemies to attack.</li>
+                    <li><b>Camera</b>: WASD or arrow keys, drag with the right or middle mouse button, push the mouse to the screen edge, or click the map. Wheel or pinch to zoom.</li>
+                    <li><b>Build</b>: select villagers and pick a building, then click where it should stand. Houses raise your population limit.</li>
+                    <li><b>Advance</b>: build two buildings of your age, then research the next age at the Town Center.</li>
+                    <li><b>Win</b>: destroy every rival Town Center and villager.</li>
+                    <li><b>Keys</b>: H town center, . idle villager, , army, Delete removes selection, Esc cancels, P pauses.</li>
+                </ul>
+                <div class="actions"><button id="how-close" class="primary">Back</button></div>
+            </div>
+        </div>
+
+        <div id="pausebox" class="sheet" hidden>
+            <div class="sheet-card small">
+                <h1>Paused</h1>
+                <div class="actions col"><button id="resume-btn" class="primary">Resume</button><button id="how-btn2">How to play</button><button id="restart-btn">New game</button></div>
+            </div>
+        </div>
+
+        <div id="end" class="sheet" hidden>
+            <div class="sheet-card">
+                <h1 id="end-title">Victory</h1>
+                <p id="end-text" class="lede"></p>
+                <table id="end-stats"></table>
+                <div class="actions"><button id="end-watch">Look around</button><button id="end-new" class="primary">New game</button></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/three@0.149.0/build/three.min.js"></script>
+    <script src="../rpg/js/worldgen.js"></script>
+    <script src="js/data.js"></script>
+    <script src="js/map.js"></script>
+    <script src="js/sim.js"></script>
+    <script src="js/ai.js"></script>
+    <script src="js/terrain.js"></script>
+    <script src="js/render.js"></script>
+    <script src="js/ui.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>
