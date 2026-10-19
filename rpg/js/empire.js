@@ -8,10 +8,10 @@ const RANKS = [
     { title: 'Squad Leader', local: 'Nayak', renown: 0, squad: 2 },
     { title: 'Captain', local: 'Senanayak', renown: 40, squad: 3 },
     { title: 'Commander', local: 'Dalapati', renown: 120, squad: 4 },
-    { title: 'General', local: 'Senapati', renown: 280, squad: 5, needs: 'sardarDefeated' },
-    { title: 'Governor', local: 'Subedar', renown: 500, squad: 6, needs: 'sardarDefeated' },
-    { title: 'King', local: 'Raja', renown: 800, squad: 7, needs: 'queenDefeated' },
-    { title: 'Emperor', local: 'Samrat', renown: 1200, squad: 8, needs: 'kaalDefeated' },
+    { title: 'General', local: 'Senapati', renown: 280, squad: 5, needs: 2 },
+    { title: 'Governor', local: 'Subedar', renown: 500, squad: 6, needs: 3 },
+    { title: 'King', local: 'Raja', renown: 800, squad: 7, needs: 4 },
+    { title: 'Emperor', local: 'Samrat', renown: 1200, squad: 8, needs: 6 },
 ];
 
 const UNITS = {
@@ -37,12 +37,15 @@ const RESEARCH = {
     nalanda: { tier: 4, cost: 120, req: ['jyotisha', 'surgery'], name: 'Nalanda Mahavihara', source: 'Great university, 5th century CE', effect: '+2 squad size and +10% renown.' },
 };
 
-const PROVINCES = {
-    rampur: { name: 'Rampur', tax: 6 },
-    dandak: { name: 'Dandak Forest', tax: 8, unlock: 'sardarDefeated', how: 'Defeat Sardar Dhurandhar Singh' },
-    thar: { name: 'Thar Desert', tax: 12, unlock: 'queenDefeated', how: 'Destroy the Scorpion Queen' },
-    himalaya: { name: 'Himalayan Pass', tax: 15, unlock: 'kaalDefeated', how: 'Defeat Rakshasa Kaal' },
-};
+// Provinces are the world's settlements; they are rebuilt whenever a world is generated.
+let PROVINCES = {};
+const PROVINCE_TAX = { village: 6, fishing: 6, ashram: 3, monastery: 5, town: 12, fort: 10 };
+const CLAIM_RENOWN = { village: 0, fishing: 0, ashram: 40, monastery: 100, town: 150, fort: 250 };
+const TYPE_NAME = { village: 'Village', town: 'Market town', fort: 'Desert fort', monastery: 'Mountain monastery', fishing: 'Fishing village', ashram: 'Forest ashram' };
+
+function buildProvinces() {
+    PROVINCES = Object.fromEntries(WORLD.settlements.map(st => [st.id, { name: st.name, tax: PROVINCE_TAX[st.type], type: st.type }]));
+}
 
 const BUILDINGS = {
     market: { name: 'Haat', kind: 'Market', desc: '+8 gold a day per level', cost: [40, 90, 160] },
@@ -52,19 +55,19 @@ const BUILDINGS = {
     roads: { name: 'Sadak', kind: 'Roads', desc: '+5 gold a day from trade per level and cheaper cart travel', cost: [35, 80, 150] },
 };
 
-const SCROLLS = [
-    { id: 'charaka', near: [13, 28], title: 'The Charaka Samhita', fact: 'This founding text of Ayurveda teaches that food, sleep and a disciplined life are the three pillars of good health.' },
-    { id: 'panini', near: [2, 15], title: "Panini's grammar", fact: 'More than 2,000 years ago Panini wrote the Ashtadhyayi, a grammar of Sanskrit with nearly 4,000 precise rules.' },
-    { id: 'chintz', near: [14, 15], title: 'Indian cotton', fact: 'Indian cotton printed with fast natural dyes such as indigo was traded across the world. The English word "chintz" comes from the Hindi word chheent.' },
-    { id: 'sushruta', near: [3, 8], title: "Sushruta's surgery", fact: 'The Sushruta Samhita describes more than a hundred surgical instruments and a method for rebuilding a damaged nose.' },
-    { id: 'wootz', near: [12, 3], title: 'Wootz steel', fact: 'Wootz steel was made in small clay crucibles in South India. Traders carried it west, where smiths forged it into famous Damascus blades.' },
-    { id: 'zero', near: [14, 12], title: 'Brahmagupta and zero', fact: 'In 628 CE Brahmagupta wrote the first known rules for calculating with zero, such as "a number minus itself is zero".' },
-    { id: 'stepwell', near: [35, 27], title: 'Rani ki Vav', fact: 'Rani ki Vav in Patan, Gujarat, is an 11th-century stepwell seven storeys deep, carved with hundreds of sculptures.' },
-    { id: 'pillar', near: [22, 28], title: 'The Iron Pillar', fact: 'The Iron Pillar of Delhi has stood for about 1,600 years with very little rust, thanks to the phosphorus in its iron.' },
-    { id: 'rockets', near: [45, 18], title: 'Mysorean rockets', fact: 'Hyder Ali and Tipu Sultan of Mysore fought with iron-cased rockets in the 1780s and 1790s. The British studied them to build their own Congreve rockets.' },
-    { id: 'jantar', near: [20, 3], title: 'Jantar Mantar', fact: 'The Samrat Yantra at Jaipur\'s Jantar Mantar, built by Sawai Jai Singh II in the 1700s, is a giant stone sundial that tells local time to within about two seconds.' },
-    { id: 'aryabhata', near: [28, 9], title: 'Aryabhata', fact: 'In 499 CE Aryabhata wrote the Aryabhatiya. He gave pi as about 3.1416 and taught that the Earth spins on its axis.' },
-    { id: 'nalanda', near: [45, 10], title: 'Nalanda', fact: 'Nalanda in Bihar was one of the world\'s first great residential universities. Scholars travelled from China, Korea and Tibet to study there.' },
+const SCROLL_FACTS = [
+    { id: 'charaka', title: 'The Charaka Samhita', fact: 'This founding text of Ayurveda teaches that food, sleep and a disciplined life are the three pillars of good health.' },
+    { id: 'panini', title: "Panini's grammar", fact: 'More than 2,000 years ago Panini wrote the Ashtadhyayi, a grammar of Sanskrit with nearly 4,000 precise rules.' },
+    { id: 'chintz', title: 'Indian cotton', fact: 'Indian cotton printed with fast natural dyes such as indigo was traded across the world. The English word "chintz" comes from the Hindi word chheent.' },
+    { id: 'sushruta', title: "Sushruta's surgery", fact: 'The Sushruta Samhita describes more than a hundred surgical instruments and a method for rebuilding a damaged nose.' },
+    { id: 'wootz', title: 'Wootz steel', fact: 'Wootz steel was made in small clay crucibles in South India. Traders carried it west, where smiths forged it into famous Damascus blades.' },
+    { id: 'zero', title: 'Brahmagupta and zero', fact: 'In 628 CE Brahmagupta wrote the first known rules for calculating with zero, such as "a number minus itself is zero".' },
+    { id: 'stepwell', title: 'Rani ki Vav', fact: 'Rani ki Vav in Patan, Gujarat, is an 11th-century stepwell seven storeys deep, carved with hundreds of sculptures.' },
+    { id: 'pillar', title: 'The Iron Pillar', fact: 'The Iron Pillar of Delhi has stood for about 1,600 years with very little rust, thanks to the phosphorus in its iron.' },
+    { id: 'rockets', title: 'Mysorean rockets', fact: 'Hyder Ali and Tipu Sultan of Mysore fought with iron-cased rockets in the 1780s and 1790s. The British studied them to build their own Congreve rockets.' },
+    { id: 'jantar', title: 'Jantar Mantar', fact: 'The Samrat Yantra at Jaipur\'s Jantar Mantar, built by Sawai Jai Singh II in the 1700s, is a giant stone sundial that tells local time to within about two seconds.' },
+    { id: 'aryabhata', title: 'Aryabhata', fact: 'In 499 CE Aryabhata wrote the Aryabhatiya. He gave pi as about 3.1416 and taught that the Earth spins on its axis.' },
+    { id: 'nalanda', title: 'Nalanda', fact: 'Nalanda in Bihar was one of the world\'s first great residential universities. Scholars travelled from China, Korea and Tibet to study there.' },
 ];
 
 let pendingCoronation = false;
@@ -73,7 +76,11 @@ let trail = [];
 const hasResearch = k => player.research.includes(k);
 
 function unlockedProvinces() {
-    return Object.keys(PROVINCES).filter(k => !PROVINCES[k].unlock || flags[PROVINCES[k].unlock]);
+    return Object.keys(PROVINCES).filter(k => player.provinces[k] && player.provinces[k].owned);
+}
+
+function rankNeeds(rk) {
+    return rk.needs ? Math.min(rk.needs, WORLD.settlements.length) : 0;
 }
 
 function bestBarracks() {
@@ -106,7 +113,7 @@ function checkRank() {
     let r = player.rank;
     while (r + 1 < RANKS.length) {
         const next = RANKS[r + 1];
-        if (player.renown >= next.renown && (!next.needs || flags[next.needs])) r++;
+        if (player.renown >= next.renown && unlockedProvinces().length >= rankNeeds(next)) r++;
         else break;
     }
     if (r <= player.rank) return;
@@ -189,6 +196,14 @@ function newDay() {
         if (p.mood < 25) notes.push(`Unrest in ${PROVINCES[k].name}: tax collectors were turned away.`);
     }
     if (!player.petition && player.day % 2 === 0 && Math.random() < 0.8) queuePetition();
+    const cleared = WORLD.lairs.filter(l => flags.cleared[l.id] !== undefined && player.day - flags.cleared[l.id] >= 6);
+    if (cleared.length && Math.random() < 0.3) {
+        const l = pick(cleared);
+        delete flags.cleared[l.id];
+        l.tier = Math.min(4, l.tier + 1);
+        spawnStatic();
+        notes.push(`Scouts report that the ${l.name.toLowerCase()} is occupied again, and stronger.`);
+    }
 
     const heal = 5 + 10 * bestBarracks() + (player.ministers.dandanayaka ? 10 : 0);
     for (const sol of player.squad) sol.hp = Math.min(unitMaxHp(sol.type), sol.hp + heal);
@@ -247,24 +262,6 @@ function construct(prov, b) {
     gainRenown(10);
 }
 
-function placeScrolls() {
-    const blocked = new Set([...NPCS, ...BOSSES].map(p => `${p.x},${p.y}`));
-    for (const s of SCROLLS) {
-        const [tx, ty] = s.near;
-        let found = null;
-        for (let r = 0; r < 6 && !found; r++) {
-            for (let dy = -r; dy <= r && !found; dy++) {
-                for (let dx = -r; dx <= r && !found; dx++) {
-                    const x = tx + dx;
-                    const y = ty + dy;
-                    if (walkable(x, y) && !blocked.has(`${x},${y}`) && ground[idx(x, y)] !== '=') found = [x, y];
-                }
-            }
-        }
-        [s.x, s.y] = found || s.near;
-    }
-}
-
 function collectScroll(s) {
     flags.scrolls.push(s.id);
     player.knowledge += 15;
@@ -272,7 +269,7 @@ function collectScroll(s) {
     const first = flags.scrolls.length === 1;
     say(lines('Palm-leaf manuscript',
         `${s.title}. ${s.fact}`,
-        first ? 'You gain 15 knowledge. Spend knowledge on new sciences in the Research tab of the menu.' : `You gain 15 knowledge. Manuscripts found: ${flags.scrolls.length} of ${SCROLLS.length}.`));
+        first ? 'You gain 15 knowledge. Spend knowledge on new sciences in the Research tab of the menu.' : `You gain 15 knowledge. Manuscripts found: ${flags.scrolls.length} of ${WORLD.scrolls.length}.`));
 }
 
 // ---------- Seasons and agriculture ----------
@@ -298,6 +295,7 @@ const CROPS = {
 };
 
 const GRAIN_PRICE = { buy: 18, sell: 9, lot: 10 };
+const BIOME_FARMING = { grassland: 1.2, forest: 1, jungle: 0.9, savanna: 0.85, desert: 0.55, badlands: 0.7, snow: 0.6, marsh: 1.1 };
 
 function seasonIndex(day = player.day) {
     return Math.floor((day - 1) / SEASON_DAYS) % SEASONS.length;
@@ -312,11 +310,7 @@ function cropsFor(seasonKey) {
 }
 
 function fieldArea(prov) {
-    let n = 0;
-    for (let y = 0; y < MAP_H; y++) for (let x = 0; x < MAP_W; x++) {
-        if (ground[idx(x, y)] === 'a' && REGION_PROVINCE[regionAt(x, y)] === prov) n++;
-    }
-    return n;
+    return settlementById(prov).fieldTiles;
 }
 
 function farm(prov) {
@@ -351,7 +345,7 @@ function harvestYield(prov) {
     const c = CROPS[f.crop];
     const water = Math.min(1.2, f.rainDays / SEASON_DAYS + irrigation(prov));
     const waterFactor = water >= c.water ? 1 + Math.min(0.3, (water - c.water) * 0.3) : 0.35 + 0.65 * (water / c.water);
-    let mult = waterFactor * (fieldArea(prov) / 20) * moodFactor(prov);
+    let mult = waterFactor * (fieldArea(prov) / 20) * moodFactor(prov) * (BIOME_FARMING[settlementById(prov).biome] || 1);
     if (player.ministers.amatya) mult *= 1.2;
     if (player.provinces[prov].focus === 'agriculture') mult *= 1.25;
     mult *= 1 - f.blight;
@@ -388,13 +382,6 @@ function grainUse() {
 
 // ---------- Transport ----------
 
-const STATIONS = {
-    rampur: { name: 'Rampur', x: 13, y: 22, cart: [14.3, 24.4], needs: null },
-    ashram: { name: "Guru Anand's ashram", x: 14, y: 10, cart: [13.2, 11.6], needs: null },
-    fort: { name: "Rani Devika's fort", x: 30, y: 26, cart: [31.5, 25.2], needs: 'bridgeFixed' },
-    pass: { name: 'Himalayan camp', x: 34, y: 8, cart: [35.3, 7.0], needs: 'passOpen' },
-};
-
 const HORSE_PRICE = 150;
 
 function stepTime() {
@@ -402,29 +389,27 @@ function stepTime() {
 }
 
 function discoverStations() {
-    for (const [k, st] of Object.entries(STATIONS)) {
-        if (!player.stations.includes(k) && Math.abs(player.x - st.x) + Math.abs(player.y - st.y) <= 3) {
-            player.stations.push(k);
-            toast(`Discovered the bullock-cart stand at ${st.name}`);
-        }
+    const s = settlementAt(player.x, player.y);
+    if (!s) return;
+    if (!player.stations.includes(s.id)) {
+        player.stations.push(s.id);
+        toast(`You reached ${s.name}. Its bullock-cart stand is now on your travel list.`);
     }
+    reveal(s.x, s.y, s.r + 4);
 }
 
 function travelCost(from, to) {
-    const a = STATIONS[from];
-    const b = STATIONS[to];
+    const a = settlementById(from);
+    const b = settlementById(to);
     const dist = Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
-    const prov = { rampur: 'rampur', ashram: 'dandak', fort: 'thar', pass: 'himalaya' }[to];
-    const roads = player.provinces[prov] ? player.provinces[prov].roads : 0;
+    const roads = player.provinces[to].roads;
     if (player.edicts.includes('roads')) return 0;
-    return Math.max(2, Math.round(dist * 0.6 * (1 - 0.2 * roads)));
+    return Math.max(2, Math.round(dist * 0.35 * (1 - 0.2 * roads)));
 }
 
 function travelLock(from, to) {
-    const st = STATIONS[to];
     if (from === to) return 'You are here';
-    if (!player.stations.includes(to)) return 'Not discovered yet';
-    if (st.needs && !flags[st.needs]) return 'The road is blocked';
+    if (!player.stations.includes(to)) return 'Not visited yet';
     if (player.gold < travelCost(from, to)) return 'Not enough gold';
     return null;
 }
@@ -432,17 +417,20 @@ function travelLock(from, to) {
 function travel(from, to, done) {
     if (travelLock(from, to)) return;
     player.gold -= travelCost(from, to);
-    const st = STATIONS[to];
+    const st = settlementById(to);
+    const carter = st.npcs.find(n => n.role === 'carter') || { x: st.x, y: st.y };
     const el = $('fade');
     el.hidden = false;
     el.classList.add('on');
     setTimeout(() => {
-        player.x = player.rx = st.x;
-        player.y = player.ry = st.y + 1;
-        if (!walkable(player.x, player.y) || entityAt(player.x, player.y)) player.y = player.ry = st.y - 1;
+        const spots = [[0, 1], [1, 0], [-1, 0], [0, -1], [1, 1], [-1, 1]].map(([dx, dy]) => [carter.x + dx, carter.y + dy]).filter(([x, y]) => walkable(x, y) && !entityAt(x, y));
+        const [x, y] = spots[0] || [st.x, st.y];
+        player.x = player.rx = x;
+        player.y = player.ry = y;
         trail = [];
-        player.time += 0.08;
-        lastRegion = regionAt(player.x, player.y);
+        player.time += Math.min(0.3, (Math.abs(st.x - settlementById(from).x) + Math.abs(st.y - settlementById(from).y)) / 400);
+        lastPlace = st.id;
+        reveal(x, y);
         showBanner(st.name);
         el.classList.remove('on');
         setTimeout(() => { el.hidden = true; }, 450);
@@ -512,12 +500,14 @@ function adjustMood(prov, n) {
 
 // ---------- Local government ----------
 
-const COUNCILS = {
-    rampur: { body: 'Gram Panchayat', head: 'Sarpanch Ramdas' },
-    dandak: { body: 'Van Panchayat (forest council)', head: 'Forest warden Dhurandhar Singh' },
-    thar: { body: 'Council of the fort', head: 'Rani Devika' },
-    himalaya: { body: 'Council of the high villages', head: 'Elder Tenzin Dorje' },
-};
+const COUNCIL_BODY = { village: 'Gram Panchayat', fishing: 'Gram Panchayat', town: 'Nagar Sabha', fort: 'Council of the fort', monastery: 'Council of the gompa', ashram: 'Ashram elders' };
+const HEAD_TITLE = { village: 'Sarpanch', fishing: 'Sarpanch', town: 'Nagar Seth', fort: 'Qiledar', monastery: 'Lama', ashram: 'Acharya' };
+
+function council(id) {
+    const st = settlementById(id);
+    const head = st.npcs.find(n => n.role === 'headman' || n.role === 'guru');
+    return { body: COUNCIL_BODY[st.type], head: `${HEAD_TITLE[st.type]} ${head ? head.name : ''}`.trim() };
+}
 
 const FOCUS = {
     agriculture: { name: 'Agriculture', effect: '+25% harvest' },
@@ -528,7 +518,7 @@ const FOCUS = {
 
 function setFocus(prov, f) {
     player.provinces[prov].focus = f;
-    toast(`${COUNCILS[prov].body} of ${PROVINCES[prov].name} will focus on ${FOCUS[f].name.toLowerCase()}`);
+    toast(`${council(prov).body} of ${PROVINCES[prov].name} will focus on ${FOCUS[f].name.toLowerCase()}`);
 }
 
 const PETITIONS = [
@@ -583,7 +573,6 @@ const PETITIONS = [
     },
     {
         id: 'tiger', text: p => `A tiger is killing cattle at the edge of ${p}.`,
-        provinces: ['dandak', 'himalaya', 'rampur'],
         choices: [
             { label: 'Hunt it yourself', run: k => { adjustMood(k, 6); huntPending = true; return 'You take up your weapon and go after the tiger.'; } },
             { label: 'Pay for stronger cattle pens (20 gold)', cost: 20, run: k => { player.gold -= 20; adjustMood(k, 3); return 'The herders build thorn fences around the pens.'; } },
@@ -593,26 +582,26 @@ const PETITIONS = [
 
 function queuePetition() {
     const provs = unlockedProvinces();
-    const options = PETITIONS.filter(p => !p.provinces || p.provinces.some(k => provs.includes(k)));
-    const pt = pick(options);
-    const pk = pt.provinces ? pick(pt.provinces.filter(k => provs.includes(k))) : pick(provs);
+    if (!provs.length) return;
+    const pt = pick(PETITIONS);
+    const pk = pick(provs);
     player.petition = { id: pt.id, prov: pk };
 }
 
 function petitionDialog() {
     const pp = player.petition;
     const pt = PETITIONS.find(p => p.id === pp.id);
-    const council = COUNCILS[pp.prov];
+    const cn = council(pp.prov);
     const choices = pt.choices.map(c => ({
         label: c.label,
         disabled: c.cost && player.gold < c.cost,
         run: () => {
             player.petition = null;
             const msg = c.run(pp.prov);
-            say(lines(council.head, msg), () => { if (huntPending) { huntPending = false; queueHunt(); } });
+            say(lines(cn.head, msg), () => { if (huntPending) { huntPending = false; queueHunt(); } });
         },
     }));
-    say([{ name: `Petition from the ${council.body}`, text: pt.text(PROVINCES[pp.prov].name) }], null, choices);
+    say([{ name: `Petition from the ${cn.body}`, text: pt.text(PROVINCES[pp.prov].name) }], null, choices);
 }
 
 let huntPending = false;
@@ -621,8 +610,55 @@ function queueHunt() {
     {
         const spots = Object.values(DIRS).map(([dx, dy]) => [player.x + dx, player.y + dy]).filter(([x, y]) => walkable(x, y) && !entityAt(x, y));
         const [x, y] = spots[0] || [player.x, player.y - 1];
-        const tiger = { kind: 'tiger', region: regionAt(player.x, player.y), x, y, rx: x, ry: y, nextMove: performance.now() + 1e9, stunUntil: 0 };
+        const tiger = { kind: 'tiger', foe: makeFoe('tiger', Math.max(0, tierAt(player.x, player.y))), region: biomeAt(player.x, player.y), x, y, rx: x, ry: y, nextMove: performance.now() + 1e9, stunUntil: 0 };
         entities.push(tiger);
         startBattle(tiger);
     }
+}
+
+// ---------- Winning settlements ----------
+
+function claimLock(id) {
+    const st = settlementById(id);
+    const p = player.provinces[id];
+    if (p.owned) return 'Already part of your realm';
+    if (p.favour < 100) return `Their trust is ${Math.round(p.favour)} of 100`;
+    if (player.renown < CLAIM_RENOWN[st.type]) return `A ${TYPE_NAME[st.type].toLowerCase()} expects ${CLAIM_RENOWN[st.type]} renown`;
+    return null;
+}
+
+function addFavour(id, n) {
+    const p = player.provinces[id];
+    if (!p || p.owned) return;
+    p.favour = Math.max(0, Math.min(100, p.favour + n));
+}
+
+function claim(id) {
+    if (claimLock(id)) return;
+    const p = player.provinces[id];
+    p.owned = true;
+    p.mood = 65;
+    if (!player.stations.includes(id)) player.stations.push(id);
+    const f = farm(id);
+    f.crop = plannedCrop(id, season().key);
+    showBanner(`${PROVINCES[id].name} joins your realm`);
+    gainRenown(40);
+    checkRank();
+}
+
+function lairCleared(lairId) {
+    const l = WORLD.lairs.find(q => q.id === lairId);
+    flags.cleared[lairId] = player.day;
+    for (const st of WORLD.settlements) {
+        const d = Math.hypot(st.x - l.x, st.y - l.y);
+        if (st.id === l.near) addFavour(st.id, 70);
+        else if (d < MAP_W * 0.22) addFavour(st.id, 25);
+    }
+}
+
+function nearestThreat(id) {
+    const st = settlementById(id);
+    const open = WORLD.lairs.filter(l => flags.cleared[l.id] === undefined);
+    open.sort((a, b) => Math.hypot(a.x - st.x, a.y - st.y) - Math.hypot(b.x - st.x, b.y - st.y));
+    return open[0] || null;
 }

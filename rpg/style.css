@@ -364,6 +364,38 @@ canvas { display: block; width: 100%; height: 100%; }
 .mini-meter.mood.bad span { background: var(--vermilion); }
 .notice { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 10px 12px; margin-top: 12px; border-radius: 10px; border: 1px solid var(--saffron); background: color-mix(in srgb, var(--saffron) 14%, var(--panel)); max-width: 640px; }
 .notice span { flex: 1 1 240px; color: var(--muted); }
+.minimap {
+    position: absolute;
+    right: 10px;
+    top: 58px;
+    width: 132px;
+    height: 132px;
+    border-radius: 10px;
+    border: 2px solid var(--panel-edge);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+    cursor: pointer;
+    image-rendering: pixelated;
+}
+.frame.in-battle .minimap { display: none; }
+@media (max-width: 560px) { .minimap { width: 92px; height: 92px; top: 100px; } }
+
+.map-wrap { max-width: 640px; margin-top: 10px; }
+.map-wrap canvas { width: 100%; height: auto; aspect-ratio: 1; border-radius: 10px; border: 1px solid var(--panel-edge); image-rendering: pixelated; }
+.map-legend { list-style: none; padding: 0; margin: 10px 0 0; display: flex; flex-wrap: wrap; gap: 6px 16px; color: var(--muted); font-size: 0.85rem; }
+.map-legend li { display: flex; align-items: center; gap: 6px; }
+.map-legend i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+
+.newworld { display: grid; place-items: center; background: color-mix(in srgb, var(--ink) 72%, transparent); }
+.newworld[hidden] { display: none; }
+.nw-card { width: min(460px, 100%); background: var(--panel); border: 2px solid var(--saffron); border-radius: 14px; padding: 20px; display: grid; gap: 10px; }
+.nw-card h2 { font-family: var(--display); font-weight: 400; color: var(--saffron); margin: 0; font-size: 1.8rem; }
+.nw-card p { margin: 0; color: var(--muted); }
+.nw-card label, .nw-label { font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-top: 6px; }
+.nw-row { display: flex; gap: 8px; }
+.nw-row input { flex: 1; min-width: 0; font: inherit; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--panel-edge); background: var(--ink); color: var(--ivory); }
+.nw-row input:focus-visible { outline: 2px solid var(--saffron); }
+.nw-actions { justify-content: flex-end; margin-top: 8px; }
+
 .tabs { display: flex; gap: 6px; margin: 12px 0 4px; flex-wrap: wrap; }
 .tabs button { padding: 6px 14px; border-radius: 999px; }
 .tabs button[aria-selected="true"] { background: var(--saffron); border-color: var(--saffron); color: var(--ink); font-weight: 600; }

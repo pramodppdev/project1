@@ -370,11 +370,77 @@ const PEOPLE = {
     kaal: { skin: '#3e1220', shirt: '#160a10', pants: '#160a10', horns: true, glow: true, bareArms: true, crown: true, scale: 2.1, barefoot: true },
 };
 
+function crocModel(scale = 1) {
+    const g = new THREE.Group();
+    const skin = mat('#4a5a32', { rough: 0.7, map: stripeTexture('#4a5a32', '#2c3820', 'spots') });
+    const belly = mat('#9a9a6a', { rough: 0.8 });
+    ellipsoid(g, skin, 0.22, 0.09, 0.5, 0, 0.13, 0);
+    ellipsoid(g, belly, 0.2, 0.05, 0.46, 0, 0.08, 0);
+    const head = pivot(g, 0, 0.13, 0.45);
+    ellipsoid(head, skin, 0.13, 0.07, 0.16, 0, 0.01, 0.08);
+    ellipsoid(head, skin, 0.08, 0.045, 0.2, 0, -0.005, 0.3);
+    for (const s of [-1, 1]) ellipsoid(head, mat('#d8c040', { emissive: '#2a2000' }), 0.025, 0.022, 0.022, 0.06 * s, 0.065, 0.06);
+    const tail = mesh(g, cone(0.12, 0.8, 8), skin, 0, 0.11, -0.85);
+    tail.rotation.x = -Math.PI / 2;
+    tail.scale.set(1, 1, 0.55);
+    const legs = [];
+    for (const [sx, sz, ph] of [[-1, 1, 0], [1, 1, Math.PI], [-1, -1, Math.PI], [1, -1, 0]]) {
+        const hip = pivot(g, sx * 0.2, 0.11, sz * 0.28);
+        const l = mesh(hip, capsule(0.035, 0.1), skin, sx * 0.05, -0.05, 0);
+        l.rotation.z = sx * 0.9;
+        legs.push([hip, ph, 0.35]);
+    }
+    g.scale.setScalar(scale);
+    return { body: g, limbs: legs, head };
+}
+
+const SKIN_TONES = ['#7a4a2e', '#8e5b3a', '#9a6a48', '#a8754e', '#b07c55', '#c08a62'];
+const CLOTH = {
+    desert: ['#d9442b', '#e8892a', '#e8b923', '#c2185b', '#f2e9d8', '#8e244d'],
+    badlands: ['#b8322a', '#e2b23a', '#f2e9d8', '#6b3a1a', '#2e7d55'],
+    snow: ['#7a1f2b', '#5a3a22', '#8a5a2b', '#3a4a6b', '#b8862e'],
+    beach: ['#2b5f9e', '#f2e9d8', '#1f7f7f', '#e2b23a', '#3f8fd9'],
+    jungle: ['#2e7d55', '#8e5b2a', '#f2e9d8', '#b8322a', '#6b8e23'],
+    default: ['#f2e9d8', '#3f8fd9', '#2e7d55', '#b8322a', '#e2b23a', '#6b4a8e', '#d9762a'],
+};
+
+// Townsfolk are dressed from their settlement's region, so each place looks different.
+function npcAppearance(e) {
+    const st = settlementById(e.settlement);
+    const r = mulberry32(e.look);
+    const pal = CLOTH[st.type === 'fishing' ? 'beach' : st.biome] || CLOTH.default;
+    const c = () => pal[Math.floor(r() * pal.length)];
+    const o = { skin: SKIN_TONES[Math.floor(r() * SKIN_TONES.length)], shirt: c(), pants: r() < 0.55 ? '#f2e9d8' : c() };
+    if (e.female) {
+        Object.assign(o, { robe: true, hair: '#1b1210', longHair: true, sash: c(), tilak: r() < 0.5 });
+        if (st.type === 'fort' || st.biome === 'desert') o.hijab = r() < 0.3 ? c() : null;
+    } else if (st.biome === 'snow') {
+        Object.assign(o, { hair: '#1b1210', robe: r() < 0.5, sash: '#b8862e' });
+    } else if (r() < 0.65) {
+        Object.assign(o, { turban: c(), turbanTail: r() < 0.4, mustache: r() < 0.6 ? '#1b1210' : null });
+    } else {
+        o.hair = '#1b1210';
+    }
+    if (e.role === 'headman') Object.assign(o, { robe: true, beard: '#d8d4cc', longBeard: !e.female && r() < 0.6, mustache: e.female ? null : '#d8d4cc' });
+    if (e.role === 'guru') Object.assign(o, { shirt: '#d9762a', pants: '#d9762a', robe: true, beard: e.female ? null : '#ecebe6', longBeard: true, bareArms: true, barefoot: true, turban: null, tilak: true });
+    if (e.role === 'healer') o.sash = '#2e7d55';
+    if (e.role === 'recruiter') Object.assign(o, { shirt: '#7a2a2a', belt: '#3a2414', turban: '#e8892a', hijab: null, robe: false, longHair: false, hair: null });
+    if (e.role === 'carter') Object.assign(o, { barefoot: true, shirt: '#f3ece0' });
+    if (e.role === 'merchant' || e.role === 'trader') o.belt = '#6b3a1a';
+    return o;
+}
+
 const MODEL_BUILDERS = {
+    croc: () => crocModel(1),
+    mugger: () => crocModel(1.9),
+    leopard: () => animal({ color: '#d9a64a', map: stripeTexture('#d9a64a', '#2e2214', 'spots'), size: [0.95, 0.35, 0.3], legH: 0.34, head: 0.27, ears: true, tail: 0.6, legR: 0.045 }),
+    snowleopard: () => animal({ color: '#e2dccf', map: stripeTexture('#e2dccf', '#3a332c', 'spots'), size: [0.95, 0.35, 0.3], legH: 0.34, head: 0.27, ears: true, tail: 0.7, legR: 0.045 }),
+    chief: () => person(PEOPLE.sardar),
+    rakshasa: () => person({ ...PEOPLE.kaal, scale: 1.8 }),
+    maneater: () => { const t = MODEL_BUILDERS.tiger(); t.body.scale.setScalar(1.55); return t; },
     boar: () => animal({ color: '#4a3528', size: [0.75, 0.42, 0.36], legH: 0.22, head: 0.28, snout: '#7a5a4a', tusks: true, ears: true, tail: 0.1 }),
     jackal: () => animal({ color: '#a8875e', leg: '#8a6c48', size: [0.62, 0.26, 0.22], legH: 0.32, head: 0.2, snout: '#c9a87e', ears: true, tail: 0.28, tailMat: mat('#7a6040') }),
     tiger: () => animal({ color: '#e0832a', map: stripeTexture('#e0832a', '#1d120a', 'stripes'), size: [1.05, 0.4, 0.36], legH: 0.34, head: 0.32, snout: '#f6ead2', ears: true, tail: 0.5, legR: 0.055 }),
-    leopard: () => animal({ color: '#e2dccf', map: stripeTexture('#e2dccf', '#3a332c', 'spots'), size: [0.95, 0.35, 0.3], legH: 0.34, head: 0.27, ears: true, tail: 0.6, legR: 0.045 }),
     cobra: cobraModel,
     scorpion: () => scorpionModel('#6e4426'),
     queen: () => scorpionModel('#4a1424', 2.3),
@@ -405,9 +471,15 @@ const MODEL_BUILDERS = {
 };
 
 function makeModel(e) {
-    const raw = e.hero ? 'hero' : e.unit ? `unit_${e.unit}` : e.npc || e.kind || e.model;
-    const key = raw.startsWith('cart_') ? 'carter' : raw;
-    const built = PEOPLE[key] ? person(PEOPLE[key]) : MODEL_BUILDERS[key]();
+    const key = e.hero ? 'hero' : e.unit ? `unit_${e.unit}` : e.kind || e.model;
+    let built;
+    if (e.npc) {
+        built = person(npcAppearance(e));
+        if (e.role === 'recruiter') addSpear(built);
+    } else {
+        built = PEOPLE[key] ? person(PEOPLE[key]) : MODEL_BUILDERS[key]();
+    }
+    if (e.foe && e.foe.tier && !e.boss) built.body.scale.multiplyScalar(1 + e.foe.tier * 0.06);
     const root = new THREE.Group();
 
     const ringColor = e.hero ? '#f29a2e' : e.boss ? '#f2c230' : e.kind ? '#d9442b' : null;
@@ -492,7 +564,7 @@ function animateModel(m, e, now, dt, speed = 1) {
     if (m.tailBob) m.tailBob.rotation.x = Math.sin(now / 260) * 0.12;
     if (m.ring && e.boss) m.ring.material.opacity = 0.5 + 0.4 * Math.sin(now / 300);
     if (m.marker) {
-        m.marker.visible = hasNews(e.npc);
+        m.marker.visible = hasNews(e);
         m.marker.position.y = 1.85 + Math.sin(now / 250) * 0.07;
     }
     const flashing = now < (m.flashUntil || 0);

@@ -36,6 +36,7 @@
             </div>
 
             <div class="quest" id="quest"></div>
+            <canvas class="minimap" id="minimap" width="132" height="132" aria-label="Minimap. Click to open the full map."></canvas>
             <div class="banner" id="banner" hidden></div>
             <div class="fade" id="fade" hidden></div>
             <div class="toast" id="toast" hidden></div>
@@ -82,6 +83,28 @@
                 <div id="menu-body"></div>
             </div>
 
+            <div class="sheet newworld" id="newworld" hidden>
+                <div class="nw-card">
+                    <h2>A new world</h2>
+                    <p>Every seed grows a different land: coasts and lakes, deserts and jungles, red plateaus, marshes and Himalayan snow, with villages, towns, forts and monasteries waiting to be won.</p>
+                    <label for="seed-input">World seed</label>
+                    <div class="nw-row">
+                        <input id="seed-input" type="number" inputmode="numeric" min="1" max="999999999">
+                        <button id="seed-random" class="ghost">Random</button>
+                    </div>
+                    <span class="nw-label">World size</span>
+                    <div class="chips">
+                        <button class="chip" data-size="small" aria-pressed="false">Small</button>
+                        <button class="chip" data-size="medium" aria-pressed="true">Medium</button>
+                        <button class="chip" data-size="large" aria-pressed="false">Large</button>
+                    </div>
+                    <div class="nw-row nw-actions">
+                        <button id="world-cancel" class="ghost" hidden>Cancel</button>
+                        <button id="world-begin" class="primary">Begin the journey</button>
+                    </div>
+                </div>
+            </div>
+
             <div class="sheet ending" id="ending" hidden>
                 <h2 id="ending-title">The land is at peace</h2>
                 <p id="ending-text"></p>
@@ -93,6 +116,7 @@
     </main>
 
     <script src="https://cdn.jsdelivr.net/npm/three@0.149.0/build/three.min.js"></script>
+    <script src="js/worldgen.js"></script>
     <script src="js/core.js"></script>
     <script src="js/empire.js"></script>
     <script src="js/models3d.js"></script>

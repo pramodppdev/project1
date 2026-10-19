@@ -8,15 +8,13 @@ function setMeter(barId, textId, value, max) {
 }
 
 function objective() {
-    if (!flags.metElder) return 'Talk to Mukhiya Ramdas near the village temple.';
-    if (!flags.sardarDefeated) return 'Defeat Sardar Dhurandhar Singh at the dacoit camp, north through Dandak Forest.';
-    if (!flags.bridgeFixed) return 'Return to Mukhiya Ramdas in Rampur.';
-    if (!flags.metRani) return 'Cross the Ganga bridge and visit Rani Devika in the desert fort.';
-    if (!flags.queenDefeated) return 'Destroy the Scorpion Queen in the ruins south-east of the fort.';
-    if (!flags.passOpen) return 'Return to Rani Devika.';
-    if (!flags.kaalDefeated) return 'Climb the mountain pass north of the fort and face Rakshasa Kaal.';
-    if (player.rank < RANKS.length - 1) return `Earn renown to be crowned Samrat: ${player.renown} of ${RANKS[RANKS.length - 1].renown}. Build up your provinces from the Empire tab.`;
-    return 'You rule as Samrat. Grow your empire and master every science.';
+    const owned = unlockedProvinces().length;
+    const next = RANKS[player.rank + 1];
+    if (!next) return 'You rule as Samrat. Explore, build and master every science.';
+    const needP = rankNeeds(next);
+    if (owned < needP) return `Win the loyalty of more settlements to become ${next.title}: ${owned} of ${needP}. Help them, clear nearby lairs, then talk to their headmen.`;
+    if (player.renown < next.renown) return `Earn renown to become ${next.title}: ${player.renown} of ${next.renown}. Clear lairs, find manuscripts and build up your realm.`;
+    return `You are ready to become ${next.title}.`;
 }
 
 function renderHud() {
@@ -31,7 +29,8 @@ function renderHud() {
     $('hud-grain').textContent = player.grain;
     $('ride-btn').hidden = !player.horse;
     $('ride-btn').textContent = player.mounted ? 'Dismount' : 'Ride';
-    $('quest').innerHTML = `<b>Quest</b>${objective()}`;
+    $('quest').innerHTML = `<b>Goal</b>${objective()}`;
+    drawMinimap();
 }
 
 function toast(text) {
@@ -107,139 +106,106 @@ function lines(name, ...texts) {
     return texts.map(text => ({ name, text }));
 }
 
-function hasNews(npcId) {
-    switch (npcId) {
-        case 'elder': return !flags.metElder || (flags.sardarDefeated && !flags.bridgeFixed);
-        case 'guru': return !player.skills.includes('pranayama');
-        case 'rani': return flags.bridgeFixed && (!flags.metRani || (flags.queenDefeated && !flags.passOpen));
-        default: return false;
-    }
+const ROLE_TITLE = {
+    headman: st => HEAD_TITLE[st.type],
+    merchant: () => 'Merchant',
+    trader: () => 'Trader',
+    healer: st => (st.type === 'monastery' ? 'Amchi' : 'Vaidya'),
+    recruiter: () => 'Havaldar',
+    carter: () => 'Cart driver',
+    guru: () => 'Guru',
+};
+
+function npcTitle(e) {
+    return `${ROLE_TITLE[e.role](settlementById(e.settlement))} ${e.name}`;
 }
 
-function talkTo(id) {
-    const npc = NPCS.find(n => n.id === id);
-    const n = npc.name;
-    switch (id) {
-        case 'elder':
-            if (!flags.metElder) {
-                flags.metElder = true;
-                say(lines(n,
-                    'Namaste, Veer. Dark days have come to Rampur.',
-                    'Sardar Dhurandhar Singh and his dacoits raid us from their camp in Dandak Forest, straight north up the path.',
-                    'They smashed the bridge over the Ganga so no help can reach us. Defeat the Sardar, and our carpenters will rebuild it.',
-                    'From today you are Nayak, leader of the village militia. Two of our bravest spearmen will march with you.',
-                    'Havaldar Bhim by the temple can train more soldiers. Seth Govind sells supplies, and Vaidya Kamala will tend your wounds for free.'),
-                () => {
-                    for (let i = 0; i < 2; i++) player.squad.push({ id: ++player.soldierSeq, type: 'paidal', hp: unitMaxHp('paidal') });
-                    toast('Two Paidal spearmen join your squad');
-                });
-            } else if (!flags.sardarDefeated) {
-                say(lines(n, 'The dacoit camp lies north through the forest. A guru lives in an ashram east of the path there. He may teach you something useful.'));
-            } else if (!flags.bridgeFixed) {
-                flags.bridgeFixed = true;
-                player.gold += 50;
-                gainRenown(40);
-                addItem('kheer', 2);
-                applyFlagsToMap();
-                say(lines(n,
-                    'Shabash, Veer! The whole village is singing your name.',
-                    'Our carpenters have already rebuilt the Ganga bridge to the east. Take 50 gold and two bowls of kheer from my wife\'s kitchen.',
-                    'Word has come from Rani Devika of the desert fort. Something terrible stirs in the Thar. Go east and help her.'),
-                () => toast('Received 50 gold and 2 Bowls of Kheer'));
-            } else if (!flags.kaalDefeated) {
-                say(lines(n, 'Rani Devika\'s fort stands past the bridge, in the Thar Desert. May the road be kind to you.'));
-            } else {
-                say(lines(n, 'They will sing songs of Veer of Rampur for a hundred years.'));
-            }
+function hasNews(e) {
+    if (!e || !e.role) return false;
+    const p = player.provinces[e.settlement];
+    if (e.role === 'headman') return (!p.owned && !claimLock(e.settlement)) || (p.owned && !!player.petition && player.petition.prov === e.settlement);
+    if (e.role === 'guru') return !flags.taught[e.settlement];
+    return false;
+}
+
+function moodWord(v) {
+    return v >= 75 ? 'joyful' : v >= 55 ? 'content' : v >= 35 ? 'uneasy' : v >= 20 ? 'angry' : 'close to revolt';
+}
+
+function journey(d) {
+    return d < 14 ? 'a short walk' : d < 32 ? "half a day's walk" : 'a long journey';
+}
+
+function talkTo(e) {
+    const st = settlementById(e.settlement);
+    const p = player.provinces[st.id];
+    const n = npcTitle(e);
+    switch (e.role) {
+        case 'headman':
+            talkHeadman(st, p, n);
             break;
-        case 'vaidya':
-            say(lines(n, 'Sit, child. A little neem, a little turmeric, and plenty of rest.'), () => {
+        case 'merchant':
+        case 'trader':
+            say(lines(n, pick(['Fresh stock today, traveller!', 'Good prices for good people.', `The finest goods in ${st.name}.`])), () => openShop(`shop:${st.id}:${e.role}`));
+            break;
+        case 'healer':
+            say(lines(n, st.type === 'monastery' ? 'Drink this herb tea and rest by the fire.' : 'Sit. A little neem, a little turmeric, and plenty of rest.'), () => {
                 const s = stats();
                 player.hp = s.maxHp;
                 player.prana = s.maxPrana;
+                addFavour(st.id, 2);
                 if (hasResearch('ayurveda')) {
                     for (const sol of player.squad) sol.hp = unitMaxHp(sol.type);
                     toast('You and your squad are fully healed');
                 } else {
-                    toast('Health and prana restored. Research Ayurveda so she can treat your soldiers too.');
+                    toast('Health and prana restored. Research Ayurveda so healers can treat your soldiers too.');
                 }
             });
             break;
-        case 'merchant':
-            say(lines(n, 'Ladoos fresh from the kadhai, and a fine talwar for a brave customer!'), () => openShop('village'));
+        case 'recruiter':
+            say(lines(n, 'Gold for soldiers, and soldiers who never run.'), () => openShop('recruit'));
             break;
-        case 'child':
-            say(lines(n, pick([
-                'Bhaiya, enemies glow red on the ground. The big glowing ones are really strong!',
-                'If a fight goes badly you can run away. But you can\'t run from a boss!',
-                'Walking slowly refills your prana. Vajra Strike hits really hard.',
-                'A yellow ! means someone has something important to tell you.',
-                'Look for glowing palm-leaf manuscripts! Each one teaches real science and gives knowledge.',
-                'Fighting at night is dangerous, but enemies drop more gold.',
-                'Soldiers want wages every day. If the treasury is empty, they leave!',
-            ])));
+        case 'carter':
+            say(lines(n, 'Ram ram! My bullocks know every road. Where shall we go?'), () => openShop(`travel:${st.id}`));
             break;
         case 'guru':
-            if (!player.skills.includes('pranayama')) {
+            if (!flags.taught[st.id]) {
+                flags.taught[st.id] = true;
+                const learn = !player.skills.includes('pranayama');
                 say(lines(n,
-                    'Peace, young warrior. You carry much anger in your shoulders.',
-                    'Sit and breathe with me. In through the nose, hold, and out slowly. The breath is life itself.',
-                    'You have learned Pranayama. In battle it will heal your wounds, if you have the prana for it.',
-                    'One more lesson. Knowledge is the sharpest weapon. The sages of Bharat wrote their discoveries on palm leaves, and those manuscripts lie scattered across the land.',
-                    'Gather them and let your scholars study. Mathematics, steel, medicine, astronomy: each science will make your people stronger. Take these notes of mine to begin.'),
-                () => { player.skills.push('pranayama'); player.knowledge += 10; toast('Learned Pranayama and received 10 knowledge'); });
+                    'Peace, young warrior. You carry much restlessness in your shoulders.',
+                    learn ? 'Sit and breathe with me. In through the nose, hold, and out slowly. You have learned Pranayama. In battle it will heal your wounds.' : 'You already know the breath. Let me share my notes instead.',
+                    'Knowledge is the sharpest weapon. Palm-leaf manuscripts lie scattered across the land. Gather them, and let your scholars study.'),
+                () => { if (learn) player.skills.push('pranayama'); player.knowledge += 15; toast(learn ? 'Learned Pranayama and received 15 knowledge' : 'Received 15 knowledge'); });
             } else {
-                say(lines(n, 'Strength without patience is a river without banks. Breathe, then strike.'));
+                say(lines(n, pick(['Strength without patience is a river without banks.', 'One who conquers himself is greater than one who conquers a thousand.', 'Every journey across the land is also a journey within.'])));
             }
-            break;
-        case 'rani':
-            if (!flags.metRani) {
-                flags.metRani = true;
-                if (flags.queenDefeated) {
-                    say(lines(n, 'You have already slain the Scorpion Queen? Then my desert owes you everything.'), () => talkTo('rani'));
-                    return;
-                }
-                say(lines(n,
-                    'So you are the hero of Rampur. Welcome to my fort.',
-                    'A giant Scorpion Queen has nested in the old ruins to the south-east. Her brood poisons our wells and her venom kills our camels.',
-                    'Destroy her, and I will send my soldiers to clear the boulders from the Himalayan pass. Something evil waits beyond it.',
-                    'Farida\'s caravan sells the finest steel in the Thar. Arm yourself well.'));
-            } else if (flags.queenDefeated && !flags.passOpen) {
-                flags.passOpen = true;
-                player.gold += 150;
-                gainRenown(60);
-                applyFlagsToMap();
-                say(lines(n,
-                    'The Scorpion Queen is dead! Tonight the whole fort will feast.',
-                    'Take 150 gold from the royal treasury. My soldiers have cleared the pass north of the fort.',
-                    'Beyond it lives Rakshasa Kaal, the demon who sent the scorpions and paid the dacoits. End this, Veer.'),
-                () => toast('Received 150 gold. The mountain pass is open.'));
-            } else if (!flags.queenDefeated) {
-                say(lines(n, 'The ruins lie south-east, past the end of the desert road.'));
-            } else if (!flags.kaalDefeated) {
-                say(lines(n, 'The pass is open. Kaal\'s cave is at the far north-east of the mountains.'));
-            } else {
-                say(lines(n, 'You will always have a place at my table, Veer.'));
-            }
-            break;
-        case 'trader':
-            say(lines(n, 'Salaam, traveller! Steel from Damascus, kheer from Lucknow. Have a look.'), () => openShop('fort'));
-            break;
-        case 'havaldar':
-            say(lines(n, flags.metElder ? 'Jai Hind, Nayak! Give me gold and I will give you soldiers who never run.' : 'Speak with the Mukhiya first, young one. Then come back and I will train soldiers for you.'),
-                flags.metElder ? () => openShop('recruit') : null);
-            break;
-        case 'captain':
-            say(lines(n, 'The Rani\'s own regiment. Archers, riders, even elephants, if your scholars know how to train them.'), () => openShop('recruit'));
             break;
         default:
-            if (id.startsWith('cart_')) {
-                const from = id.slice(5);
-                if (!player.stations.includes(from)) player.stations.push(from);
-                say(lines(n, 'Ram ram! My bullocks know every road in the land. Where shall we go?'), () => openShop(`travel:${from}`));
-            }
             break;
     }
+}
+
+function talkHeadman(st, p, n) {
+    if (p.owned) {
+        const choices = [];
+        if (player.petition && player.petition.prov === st.id) choices.push({ label: 'Hear the petition', run: () => { player.petition.shown = true; petitionDialog(); } });
+        choices.push({ label: 'Open the Durbar', run: () => { openMenu(); menuTab = 'rajya'; renderMenu(); } });
+        choices.push({ label: 'Farewell', run: () => {} });
+        say(lines(n, `${st.name} is loyal to you. The people are ${moodWord(p.mood)}.`), null, choices);
+        return;
+    }
+    const threat = nearestThreat(st.id);
+    const lock = claimLock(st.id);
+    const greet = p.favour < 30 ? `We do not know you, stranger. ${st.name} looks after itself.`
+        : p.favour < 100 ? `You have helped ${st.name}. The people speak your name.`
+        : `${st.name} trusts you completely.`;
+    say(lines(n, `${greet} Trust: ${Math.round(p.favour)} of 100.`), null, [
+        { label: 'Offer a gift of 40 gold (+25 trust)', disabled: player.gold < 40, run: () => { player.gold -= 40; addFavour(st.id, 25); say(lines(n, `${st.name} thanks you. Trust is now ${Math.round(p.favour)} of 100.`)); } },
+        { label: 'Ask what troubles them', run: () => say(lines(n, threat ? `A ${threat.name.toLowerCase()} lies ${journey(Math.hypot(threat.x - st.x, threat.y - st.y))} to the ${compass(st.x, st.y, threat.x, threat.y)}. Clear it and we will be in your debt.` : 'The roads are quiet, thanks to brave travellers. Gifts and trade will win our trust.')) },
+        { label: lock ? `Ask ${st.name} to join your realm (${lock})` : `Ask ${st.name} to join your realm`, disabled: !!lock, run: () => { claim(st.id); say(lines(n, `From today ${st.name} is part of your realm. The ${council(st.id).body} will serve you.`)); } },
+        { label: 'Farewell', run: () => {} },
+    ]);
 }
 
 // ---------- Inventory helpers ----------
@@ -271,7 +237,7 @@ function damage(atk, def) {
 }
 
 function startBattle(ent) {
-    const def = ENEMIES[ent.kind];
+    const def = ent.foe;
     ui.battle = { ent, def, hp: def.hp, maxHp: def.hp, turn: 0, busy: false, charging: false, done: false, menu: 'main' };
     held.clear();
     $('battle-log').innerHTML = '';
@@ -476,7 +442,7 @@ function winBattle() {
     const spoils = b.night ? 1.25 : 1;
     const xp = Math.round(b.def.xp * spoils);
     const gold = Math.round(b.def.gold * goldMult() * spoils);
-    const renown = b.def.boss ? { sardar: 60, queen: 120, kaal: 200 }[b.ent.kind] : Math.ceil(b.def.xp / 6);
+    const renown = b.def.boss ? 40 + 30 * b.def.tier : Math.ceil(b.def.xp / 6);
     const know = b.def.boss ? 10 : 1;
     player.xp += xp;
     player.gold += gold;
@@ -491,7 +457,10 @@ function winBattle() {
         player.prana = s.maxPrana;
         blog(`Level up! You are now level ${player.lvl}. Health and prana restored.`, 'gold');
     }
-    if (b.def.boss) flags[b.def.boss] = true;
+    if (b.def.boss) {
+        lairCleared(b.ent.lair);
+        blog('The lair is cleared. Nearby settlements will hear of this.', 'good');
+    }
     gainRenown(renown);
     save();
     renderBattle();
@@ -518,35 +487,27 @@ function endBattle() {
         player.gold -= lostGold;
         player.hp = s.maxHp;
         player.prana = s.maxPrana;
-        player.x = player.rx = START.x;
-        player.y = player.ry = START.y;
-        lastRegion = 'village';
+        const homes = unlockedProvinces().map(settlementById);
+        homes.sort((p1, p2) => Math.hypot(p1.x - player.x, p1.y - player.y) - Math.hypot(p2.x - player.x, p2.y - player.y));
+        const safe = homes[0] || WORLD.home;
+        player.x = player.rx = safe.x;
+        player.y = player.ry = safe.y + 1;
+        lastPlace = safe.id;
         trail = [];
-        say(lines('Vaidya Kamala', `Villagers carried you home, Veer. You lost ${lostGold} gold on the road, but you will live. Rest, then try again.`));
+        say(lines('A passing healer', `Travellers carried you to ${safe.name}. You lost ${lostGold} gold on the road, but you will live. Rest, then try again.`));
     } else if (b.won && b.def.boss) {
-        const after = {
-            sardar: lines('Sardar Dhurandhar Singh', 'Enough! Enough! I yield. A demon in the mountains paid us to raid your village... I swear we will trouble Rampur no more!'),
-            queen: lines('Veer', 'The Scorpion Queen crumbles into the sand. I should tell Rani Devika.'),
-            kaal: lines('Rakshasa Kaal', 'Impossible... defeated by a farmer from Rampur... The mountains... are free...'),
-        }[b.ent.kind];
-        say(after, b.ent.kind === 'kaal' ? () => {
-            const crowned = pendingCoronation || player.rank === RANKS.length - 1;
-            pendingCoronation = false;
-            showEnding(crowned ? 'coronation' : 'victory');
-        } : null);
+        const l = WORLD.lairs.find(q => q.id === b.ent.lair);
+        say(lines('Veer', `The ${b.def.name} is beaten and the ${LAIR_TYPES[l.type].name.toLowerCase()} is cleared. ${settlementById(l.near).name} will be grateful.`));
     }
     save();
     renderHud();
 }
 
-function showEnding(kind) {
+function showEnding() {
     ui.ending = true;
     held.clear();
-    const crowned = kind === 'coronation';
-    $('ending-title').textContent = crowned ? 'Samrat Veer' : 'The land is at peace';
-    $('ending-text').textContent = crowned
-        ? `On the banks of the Ganga, the people crown you Samrat, Emperor of Bharat. You began as the Nayak of a village militia. Now you rule ${unlockedProvinces().length} provinces, command ${player.squad.length} soldiers and have mastered ${player.research.length} sciences.`
-        : `Rakshasa Kaal is no more, and the Himalayan Pass is yours to govern. Keep building your provinces and earning renown. At ${RANKS[RANKS.length - 1].renown} renown the people will crown you Samrat. You have ${player.renown}.`;
+    $('ending-title').textContent = 'Samrat Veer';
+    $('ending-text').textContent = `The people of ${unlockedProvinces().length} settlements crown you Samrat, Emperor of the land. You began as the Nayak of a village militia in ${WORLD.home.name}. Now you command ${player.squad.length} soldiers and have mastered ${player.research.length} sciences. The world is still yours to explore.`;
     $('ending').hidden = false;
 }
 
@@ -572,22 +533,27 @@ function renderRecruit() {
 }
 
 function renderTravel(from) {
+    const here = settlementById(from);
     $('shop-title').textContent = 'Bullock-cart travel';
     $('shop-gold').textContent = player.gold;
-    $('shop-list').innerHTML = Object.entries(STATIONS).map(([k, st]) => {
-        const lock = travelLock(from, k);
-        return `<li><span class="ico">🐂</span><span class="what"><b>${st.name}</b><small>${k === from ? 'You are here' : lock || `About ${Math.max(1, Math.round((Math.abs(st.x - STATIONS[from].x) + Math.abs(st.y - STATIONS[from].y)) / 6))} hours on the road`}</small></span>
-            <button data-travel="${from}:${k}" ${lock ? 'disabled' : ''}>${k === from ? 'Here' : `Travel · ${travelCost(from, k)}`}</button></li>`;
-    }).join('');
+    const list = player.stations.map(settlementById).sort((a, c) => Math.hypot(a.x - here.x, a.y - here.y) - Math.hypot(c.x - here.x, c.y - here.y));
+    $('shop-list').innerHTML = list.map(st => {
+        const lock = travelLock(from, st.id);
+        const owned = player.provinces[st.id].owned ? ' · your realm' : '';
+        return `<li><span class="ico">🐂</span><span class="what"><b>${st.name}</b><small>${TYPE_NAME[st.type]}${owned} · ${st.id === from ? 'you are here' : lock || `${journey(Math.hypot(st.x - here.x, st.y - here.y))} to the ${compass(here.x, here.y, st.x, st.y)}`}</small></span>
+            <button data-travel="${from}:${st.id}" ${lock ? 'disabled' : ''}>${st.id === from ? 'Here' : `Travel · ${travelCost(from, st.id)}`}</button></li>`;
+    }).join('') + (list.length < 2 ? '<li><span class="what"><small>Visit other settlements to add their cart stands to this list.</small></span></li>' : '');
 }
 
 function renderShop() {
     if (ui.shop === 'recruit') return renderRecruit();
     if (ui.shop.startsWith('travel:')) return renderTravel(ui.shop.slice(7));
-    const shop = SHOPS[ui.shop];
-    $('shop-title').textContent = shop.title;
+    const [, sid, role] = ui.shop.split(':');
+    const st = settlementById(sid);
+    const stock = SHOP_STOCK[role === 'trader' ? 'town' : st.type];
+    $('shop-title').textContent = `${st.name} ${role === 'trader' ? 'caravan' : 'bazaar'}`;
     $('shop-gold').textContent = player.gold;
-    $('shop-list').innerHTML = shop.stock.map(k => {
+    $('shop-list').innerHTML = stock.map(k => {
         if (k === 'horse') {
             return `<li><span class="ico">🐎</span><span class="what"><b>Marwari horse</b><small>Ride at twice the speed. Eats 1 grain a day.</small></span>
                 <button data-buy="horse" ${player.horse || player.gold < HORSE_PRICE ? 'disabled' : ''}>${player.horse ? 'Owned' : `Buy · ${HORSE_PRICE}`}</button></li>`;
@@ -631,6 +597,7 @@ function buy(key) {
         if ((g.atk || g.def || 0) > (current.atk || current.def || 0)) player[g.slot] = key;
         toast(`Bought and equipped the ${g.name}`);
     }
+    if (ui.shop && ui.shop.startsWith('shop:')) addFavour(ui.shop.split(':')[1], 3);
     save();
     renderShop();
     renderHud();
@@ -650,11 +617,12 @@ function openMenu() {
 let menuTab = 'hero';
 
 function renderMenu() {
-    const tabs = [['hero', 'Veer'], ['squad', 'Squad'], ['research', 'Research'], ['empire', 'Empire'], ['krishi', 'Farming'], ['rajya', 'Government'], ['yatra', 'Travel']];
+    const tabs = [['hero', 'Veer'], ['squad', 'Squad'], ['research', 'Research'], ['empire', 'Empire'], ['krishi', 'Farming'], ['rajya', 'Government'], ['yatra', 'Travel'], ['naksha', 'Map']];
     const nav = `<div class="tabs" role="tablist">${tabs.map(([k, label]) =>
         `<button role="tab" data-tab="${k}" aria-selected="${menuTab === k}">${label}</button>`).join('')}</div>`;
-    const body = { hero: menuHero, squad: menuSquad, research: menuResearch, empire: menuEmpire, krishi: menuKrishi, rajya: menuRajya, yatra: menuYatra }[menuTab]();
+    const body = { hero: menuHero, squad: menuSquad, research: menuResearch, empire: menuEmpire, krishi: menuKrishi, rajya: menuRajya, yatra: menuYatra, naksha: menuMap }[menuTab]();
     $('menu-body').innerHTML = nav + body;
+    if (menuTab === 'naksha') drawWorldMap($('world-map'));
 }
 
 function statBox(label, value) {
@@ -721,7 +689,7 @@ function menuResearch() {
         }).join('');
         return `<h3>Tier ${t}</h3><ul class="offers">${cards}</ul>`;
     }).join('');
-    return `<p class="panel-sub">Knowledge: <b>${player.knowledge}</b>. Earn it in battle, from palm-leaf manuscripts (${flags.scrolls.length} of ${SCROLLS.length} found) and from Vidyalayas in your provinces.</p>${tiers}`;
+    return `<p class="panel-sub">Knowledge: <b>${player.knowledge}</b>. Earn it in battle, from palm-leaf manuscripts (${flags.scrolls.length} of ${WORLD.scrolls.length} found) and from Vidyalayas in your provinces.</p>${tiers}`;
 }
 
 function menuEmpire() {
@@ -729,17 +697,17 @@ function menuEmpire() {
     const next = RANKS[player.rank + 1];
     const ladder = RANKS.map((rk, i) => `<li class="${i === player.rank ? 'current' : i < player.rank ? 'past' : ''}"><b>${rk.title}</b><small>${rk.local} · ${rk.renown} renown · squad ${rk.squad}</small></li>`).join('');
     const nextLine = next
-        ? `${player.renown} of ${next.renown} renown to become ${next.title}${next.needs && !flags[next.needs] ? ` (you must also ${{ sardarDefeated: 'defeat the Sardar', queenDefeated: 'destroy the Scorpion Queen', kaalDefeated: 'defeat Rakshasa Kaal' }[next.needs]})` : ''}.`
+        ? `${player.renown} of ${next.renown} renown to become ${next.title}${rankNeeds(next) ? `, and ${rankNeeds(next)} settlements in your realm (you have ${unlockedProvinces().length})` : ''}.`
         : 'You have reached the highest rank.';
-    const provs = Object.entries(PROVINCES).map(([k, pv]) => {
-        if (pv.unlock && !flags[pv.unlock]) return `<div class="prov locked"><b>${pv.name}</b><small>${pv.how} to rule this province.</small></div>`;
+    const provs = Object.entries(PROVINCES).filter(([k]) => player.provinces[k].owned || player.stations.includes(k)).map(([k, pv]) => {
         const p = player.provinces[k];
+        if (!p.owned) return `<div class="prov locked"><b>${pv.name}</b><small>${TYPE_NAME[pv.type]} · trust ${Math.round(p.favour)} of 100 · ${claimLock(k) || 'ready to join: talk to the headman'}</small></div>`;
         const rows = Object.entries(BUILDINGS).map(([bk, bd]) => {
             const cost = buildCost(k, bk);
             const pips = [1, 2, 3].map(l => `<i class="${p[bk] >= l ? 'on' : ''}"></i>`).join('');
             return `<li><span class="what"><b>${bd.name} <span class="pips">${pips}</span></b><small>${bd.kind} · ${bd.desc}</small></span>${cost === null ? '<span class="tag done">Max</span>' : `<button data-build="${k}:${bk}" ${player.gold >= cost ? '' : 'disabled'}>${p[bk] ? 'Upgrade' : 'Build'} · ${cost}</button>`}</li>`;
         }).join('');
-        return `<div class="prov"><b>${pv.name}</b><small>Base tax ${pv.tax} gold a day</small><ul class="offers">${rows}</ul></div>`;
+        return `<div class="prov"><b>${pv.name}</b><small>${TYPE_NAME[pv.type]} · base tax ${pv.tax} gold a day</small><ul class="offers">${rows}</ul></div>`;
     }).join('');
     return `
         <h3>Rank</h3>
@@ -748,8 +716,8 @@ function menuEmpire() {
         <ol class="ladder">${ladder}</ol>
         <h3>Treasury</h3>
         <p class="panel-sub">Day ${player.day}, ${dayPhase().label.toLowerCase()}${player.weather === 'rain' ? ', monsoon rain' : ''}. Each dawn your provinces pay <b>${y.gold}</b> gold and <b>${y.know}</b> knowledge, and your soldiers draw <b>${y.wages}</b> gold in wages.</p>
-        <h3>Provinces</h3>
-        <div class="provs">${provs}</div>`;
+        <h3>Settlements you know</h3>
+        <div class="provs">${provs || '<p class="panel-sub">Explore to find other settlements.</p>'}</div>`;
 }
 
 function moodBar(v) {
@@ -761,8 +729,7 @@ function menuKrishi() {
     const s = season();
     const nextS = SEASONS[(seasonIndex() + 1) % SEASONS.length];
     const dayIn = (player.day - 1) % SEASON_DAYS;
-    const provs = Object.entries(PROVINCES).map(([k, pv]) => {
-        if (pv.unlock && !flags[pv.unlock]) return `<div class="prov locked"><b>${pv.name}</b><small>${pv.how} to farm here.</small></div>`;
+    const provs = Object.entries(PROVINCES).filter(([k]) => player.provinces[k].owned).map(([k, pv]) => {
         const f = farm(k);
         const c = f.crop ? CROPS[f.crop] : null;
         const h = harvestYield(k);
@@ -795,15 +762,14 @@ function menuRajya() {
     const edictLocked = player.rank < EDICT_RANK;
     const edicts = Object.entries(EDICTS).map(([k, e]) => `<li class="${player.edicts.includes(k) ? 'tech done' : ''}"><span class="what"><b>${e.name}</b><small>${e.desc} ${e.effect}.</small></span>
         <button data-edict="${k}" ${edictLocked ? 'disabled' : ''}>${player.edicts.includes(k) ? 'Repeal' : 'Proclaim'}</button></li>`).join('');
-    const councils = Object.entries(PROVINCES).map(([k, pv]) => {
-        if (pv.unlock && !flags[pv.unlock]) return `<div class="prov locked"><b>${pv.name}</b><small>${pv.how} to bring this land under your rule.</small></div>`;
+    const councils = Object.entries(PROVINCES).filter(([k]) => player.provinces[k].owned).map(([k, pv]) => {
         const p = player.provinces[k];
         const focus = Object.entries(FOCUS).map(([fk, f]) => `<button class="chip" data-focus="${k}:${fk}" aria-pressed="${p.focus === fk}" title="${f.effect}">${f.name}</button>`).join('');
-        return `<div class="prov"><b>${pv.name}</b><small>${COUNCILS[k].body} · led by ${COUNCILS[k].head}</small>${moodBar(p.mood)}
+        return `<div class="prov"><b>${pv.name}</b><small>${council(k).body} · led by ${council(k).head}</small>${moodBar(p.mood)}
             <small>Council priority:</small><div class="chips">${focus}</div></div>`;
     }).join('');
     return `
-        ${player.petition ? `<div class="notice"><b>A petition is waiting</b><span>The ${COUNCILS[player.petition.prov].body} of ${PROVINCES[player.petition.prov].name} asks for your judgement.</span><button class="primary" data-petition="1">Hear it</button></div>` : ''}
+        ${player.petition ? `<div class="notice"><b>A petition is waiting</b><span>The ${council(player.petition.prov).body} of ${PROVINCES[player.petition.prov].name} asks for your judgement.</span><button class="primary" data-petition="1">Hear it</button></div>` : ''}
         <h3>Revenue</h3>
         <p class="panel-sub">Land tax: <b>${TAXES[player.tax].name}</b>, ${TAXES[player.tax].share}. Heavy taxes fill the treasury but anger the people. Contentment also changes how much tax actually reaches you.</p>
         <div class="chips">${taxes}</div>
@@ -820,13 +786,13 @@ function menuRajya() {
 }
 
 function menuYatra() {
-    const stations = Object.entries(STATIONS).map(([k, st]) => `<li><span class="ico">🐂</span><span class="what"><b>${st.name}</b><small>${player.stations.includes(k) ? (st.needs && !flags[st.needs] ? 'Road blocked for now' : 'Cart stand discovered') : 'Not discovered yet. Walk near it to find it.'}</small></span><span></span></li>`).join('');
+    const stations = player.stations.map(settlementById).map(st => `<li><span class="ico">🐂</span><span class="what"><b>${st.name}</b><small>${TYPE_NAME[st.type]} · ${journey(Math.hypot(st.x - player.x, st.y - player.y))} to the ${compass(player.x, player.y, st.x, st.y)}</small></span><span></span></li>`).join('');
     return `
         <h3>Your horse</h3>
-        <p class="panel-sub">${player.horse ? `You own a Marwari horse and are ${player.mounted ? 'riding' : 'on foot'}. Riding doubles your speed. Press R or use the Ride button.` : `Seth Govind in Rampur sells a fine Marwari horse for ${HORSE_PRICE} gold. Riding doubles your speed.`}</p>
+        <p class="panel-sub">${player.horse ? `You own a Marwari horse and are ${player.mounted ? 'riding' : 'on foot'}. Riding doubles your speed. Press R or use the Ride button.` : `Merchants in villages, towns and forts sell Marwari horses for ${HORSE_PRICE} gold. Riding doubles your speed.`}</p>
         ${player.horse ? `<div class="menu-foot"><button data-ride="1">${player.mounted ? 'Dismount' : 'Mount your horse'}</button></div>` : ''}
         <h3>Bullock carts</h3>
-        <p class="panel-sub">Cart drivers wait at stands across the land. Talk to one to travel to any stand you have discovered. Roads in a province make the fare cheaper.</p>
+        <p class="panel-sub">Every settlement has a cart driver. Talk to one to travel to any settlement you have visited. Roads in your provinces make the fare cheaper.</p>
         <ul class="offers">${stations}</ul>`;
 }
 
@@ -838,47 +804,171 @@ function closeSheet(name) {
     renderHud();
 }
 
+// ---------- Map ----------
+
+const MAP_COLORS = { p: '#c9a46a', '=': '#8a5a2b', a: '#7a5a3a' };
+
+function tileColor(i) {
+    const g = ground[i];
+    if (MAP_COLORS[g]) return MAP_COLORS[g];
+    const o = objects[i];
+    if (o === 'M') return '#8a8580';
+    if (o === 'H' || o === 'K' || o === 'W' || o === 'X' || o === 'g' || o === 'V') return '#efe2c8';
+    if (o === 'T' || o === 'J' || o === 'P') return shade(BIOMES[biome[i]].map, -0.08);
+    return BIOMES[biome[i]].map;
+}
+
+function drawWorldMap(c, cx, cy, radius) {
+    if (!c) return;
+    const g = c.getContext('2d');
+    const full = radius === undefined;
+    const x0 = full ? 0 : cx - radius;
+    const y0 = full ? 0 : cy - radius;
+    const span = full ? MAP_W : radius * 2 + 1;
+    const px = c.width / span;
+    g.fillStyle = '#120d18';
+    g.fillRect(0, 0, c.width, c.height);
+    for (let y = 0; y < span; y++) {
+        for (let x = 0; x < span; x++) {
+            const tx = x0 + x;
+            const ty = y0 + y;
+            if (!inMap(tx, ty)) continue;
+            const i = idx(tx, ty);
+            if (!explored[i]) continue;
+            g.fillStyle = tileColor(i);
+            g.fillRect(Math.floor(x * px), Math.floor(y * px), Math.ceil(px), Math.ceil(px));
+        }
+    }
+    const dot = (tx, ty, color, r, ring) => {
+        const sx = (tx - x0 + 0.5) * px;
+        const sy = (ty - y0 + 0.5) * px;
+        if (sx < -r || sy < -r || sx > c.width + r || sy > c.height + r) return;
+        g.beginPath();
+        g.arc(sx, sy, r, 0, Math.PI * 2);
+        g.fillStyle = color;
+        g.fill();
+        if (ring) { g.lineWidth = 2; g.strokeStyle = ring; g.stroke(); }
+    };
+    for (const l of WORLD.lairs) if (explored[idx(l.x, l.y)] && flags.cleared[l.id] === undefined) dot(l.x, l.y, '#d9442b', full ? 4 : 3, '#1a1322');
+    for (const sc of WORLD.scrolls) if (explored[idx(sc.x, sc.y)] && !flags.scrolls.includes(sc.id)) dot(sc.x, sc.y, '#ffd76a', full ? 3 : 2.5);
+    for (const st of WORLD.settlements) {
+        if (!explored[idx(st.x, st.y)]) continue;
+        dot(st.x, st.y, player.provinces[st.id].owned ? '#f29a2e' : '#f6ead2', full ? 5 : 4, '#1a1322');
+        if (full) {
+            g.font = '600 12px Hind, system-ui, sans-serif';
+            g.textAlign = 'center';
+            g.lineWidth = 3;
+            g.strokeStyle = 'rgba(18,13,24,0.85)';
+            const sy = (st.y - y0) * px - 7;
+            g.strokeText(st.name, (st.x - x0 + 0.5) * px, sy);
+            g.fillStyle = '#f6ead2';
+            g.fillText(st.name, (st.x - x0 + 0.5) * px, sy);
+        }
+    }
+    dot(player.x, player.y, '#3f8fd9', full ? 5 : 4, '#ffffff');
+}
+
+function drawMinimap() {
+    const c = $('minimap');
+    if (c && WORLD) drawWorldMap(c, player.x, player.y, 22);
+}
+
+function menuMap() {
+    const owned = unlockedProvinces().length;
+    const seen = explored.reduce((a, v) => a + v, 0);
+    return `
+        <p class="panel-sub">World seed <b>${WORLD.seed}</b> · ${WORLD.sizeKey} world of ${MAP_W} by ${MAP_H} · ${Math.round((seen / explored.length) * 100)}% explored · ${owned} of ${WORLD.settlements.length} settlements in your realm · ${Object.keys(flags.cleared).length} of ${WORLD.lairs.length} lairs cleared.</p>
+        <div class="map-wrap"><canvas id="world-map" width="640" height="640" aria-label="Map of the explored world"></canvas></div>
+        <ul class="map-legend">
+            <li><i style="background:#f29a2e"></i>Your settlements</li>
+            <li><i style="background:#f6ead2"></i>Other settlements</li>
+            <li><i style="background:#d9442b"></i>Lairs</li>
+            <li><i style="background:#ffd76a"></i>Manuscripts</li>
+            <li><i style="background:#3f8fd9"></i>You</li>
+        </ul>`;
+}
+
 // ---------- Save, load, start ----------
 
 function save() {
-    try { localStorage.setItem(SAVE_KEY, JSON.stringify({ player, flags })); } catch { /* storage unavailable */ }
+    if (!WORLD || !player) return;
+    try {
+        localStorage.setItem(SAVE_KEY, JSON.stringify({ seed: WORLD.seed, size: WORLD.sizeKey, player, flags, explored: encodeExplored(), lairTiers: WORLD.lairs.map(l => l.tier) }));
+    } catch { /* storage unavailable */ }
 }
 
 function load() {
     try {
         const data = JSON.parse(localStorage.getItem(SAVE_KEY));
-        if (data && data.player && data.flags) return data;
+        if (data && data.player && data.flags && data.seed !== undefined) return data;
     } catch { /* ignore a missing or corrupt save */ }
     return null;
 }
 
-function startGame(data) {
-    player = Object.assign(newPlayer(), data ? data.player : {});
+function randomSeed() {
+    return Math.floor(Math.random() * 900000) + 100000;
+}
+
+function startGame(data, seed, size) {
+    generateWorld(data ? data.seed : seed, data ? data.size : size);
+    if (data && data.lairTiers) data.lairTiers.forEach((t, i) => { if (WORLD.lairs[i]) WORLD.lairs[i].tier = t; });
+    buildProvinces();
+    player = Object.assign(newPlayer(WORLD.home), data ? data.player : {});
     player.rx = player.x;
     player.ry = player.y;
     flags = data ? data.flags : {};
     flags.scrolls = flags.scrolls || [];
-    for (const k of Object.keys(PROVINCES)) player.provinces[k] = { ...newProvince(), ...(player.provinces[k] || {}) };
-    buildWorld();
-    applyFlagsToMap();
-    placeScrolls();
+    flags.cleared = flags.cleared || {};
+    flags.taught = flags.taught || {};
+    for (const st of WORLD.settlements) player.provinces[st.id] = { ...newProvince(st), ...(player.provinces[st.id] || {}) };
+    decodeExplored(data && data.explored);
+    if (!data) {
+        for (let i = 0; i < 2; i++) player.squad.push({ id: ++player.soldierSeq, type: 'paidal', hp: unitMaxHp('paidal') });
+    }
+    reveal(player.x, player.y, 10);
     if (!unlockedProvinces().every(k => player.provinces[k].farm && player.provinces[k].farm.crop)) sowAll();
     trail = [];
     pendingCoronation = false;
-    if (renderer) { clearModels(); clearFollowers(); }
+    if (renderer) { clearModels(); clearFollowers(); worldDirty = true; }
     entities = [];
     spawnStatic();
-    populate(true);
-    lastRegion = regionAt(player.x, player.y);
-    for (const id of ['battle', 'shop', 'menu', 'ending']) $(id).hidden = true;
-    ui = { dialog: null, battle: null, shop: null, menu: false, ending: false };
+    for (let i = 0; i < 6; i++) populate();
+    const here = settlementAt(player.x, player.y);
+    lastPlace = here ? here.id : biomeAt(player.x, player.y);
+    for (const id of ['battle', 'shop', 'menu', 'ending', 'newworld']) $(id).hidden = true;
+    ui = { dialog: null, battle: null, shop: null, menu: false, ending: false, newWorld: false };
     renderHud();
+    save();
     if (!data) {
         say(lines('Legends of Bharat',
-            'You are Veer, a young farmer of Rampur village on the banks of the Ganga.',
-            'Your village is in danger. Go and speak with Mukhiya Ramdas, the village headman. Look for the yellow ! above his head.'));
+            `You are Veer, a young farmer of ${WORLD.home.name}. The village has made you Nayak of its militia, and two spearmen march with you.`,
+            'The land is open before you: forests, deserts, mountains, rivers and coasts, with villages, towns and forts that answer to no one yet.',
+            'Help settlements, clear the lairs that threaten them and win their trust. Rise from squad leader to Samrat. Press M for the Durbar and the map.'));
     } else {
-        renderDialog();
-        showBanner(REGIONS[lastRegion].name);
+        showBanner(placeName(player.x, player.y));
     }
+}
+
+// ---------- New world ----------
+
+let newWorldSize = 'medium';
+
+function openNewWorld(canCancel) {
+    ui.newWorld = true;
+    held.clear();
+    $('seed-input').value = randomSeed();
+    $('world-cancel').hidden = !canCancel;
+    renderNewWorld();
+    $('newworld').hidden = false;
+}
+
+function renderNewWorld() {
+    for (const b of document.querySelectorAll('[data-size]')) b.setAttribute('aria-pressed', String(b.dataset.size === newWorldSize));
+}
+
+function beginNewWorld() {
+    const seed = parseInt($('seed-input').value, 10);
+    const sd = Number.isFinite(seed) && seed > 0 ? seed : randomSeed();
+    try { localStorage.removeItem(SAVE_KEY); } catch { /* ignore */ }
+    startGame(null, sd, newWorldSize);
 }

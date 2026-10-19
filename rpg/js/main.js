@@ -18,7 +18,7 @@ function frame(now) {
         if (now >= moveReadyAt && held.size) tryMove([...held].pop(), now);
         moveEnemies(now);
         spawnClock += dt;
-        if (spawnClock > 1) { spawnClock = 0; populate(false); }
+        if (spawnClock > 1) { spawnClock = 0; populate(); }
     }
 
     approach(player, 1000 / stepTime(), dt);
@@ -118,8 +118,8 @@ $('menu-body').addEventListener('click', ev => {
     }
     if (ev.target.closest('#restart')) {
         if (!restartArmed) { restartArmed = true; renderMenu(); return; }
-        try { localStorage.removeItem(SAVE_KEY); } catch { /* ignore */ }
-        startGame(null);
+        closeSheet('menu');
+        openNewWorld(true);
     }
 });
 for (const btn of document.querySelectorAll('[data-close]')) {
@@ -131,7 +131,24 @@ $('ending-close').addEventListener('click', () => {
     renderHud();
 });
 
+$('seed-random').addEventListener('click', () => { $('seed-input').value = randomSeed(); });
+$('world-begin').addEventListener('click', beginNewWorld);
+$('world-cancel').addEventListener('click', () => { ui.newWorld = false; $('newworld').hidden = true; });
+for (const b of document.querySelectorAll('[data-size]')) b.addEventListener('click', () => { newWorldSize = b.dataset.size; renderNewWorld(); });
+$('seed-input').addEventListener('keydown', ev => { if (ev.key === 'Enter') beginNewWorld(); ev.stopPropagation(); });
+$('minimap').addEventListener('click', () => { if (!uiOpen()) { openMenu(); menuTab = 'naksha'; renderMenu(); } });
+
 init3d();
 new ResizeObserver(resize).observe(canvas);
-startGame(load());
+const saved = load();
+if (saved) {
+    startGame(saved);
+} else {
+    // A random world is shown behind the welcome screen while a seed is chosen.
+    startGame(null, randomSeed(), 'medium');
+    try { localStorage.removeItem(SAVE_KEY); } catch { /* ignore */ }
+    ui.dialog = null;
+    renderDialog();
+    openNewWorld(false);
+}
 requestAnimationFrame(frame);
