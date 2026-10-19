@@ -355,7 +355,7 @@ function cmdMove(units, x, y) {
         const ox = (k % cols - (cols - 1) / 2) * 0.8;
         const oy = (Math.floor(k / cols) - (Math.ceil(n / cols) - 1) / 2) * 0.8;
         const [gx, gy] = nearestPassable(x + ox, y + oy);
-        u.task = { type: 'move' };
+        u.task = { type: 'move', x: gx, y: gy, tries: 0 };
         pathToward(u, [[gx, gy]], gx, gy, `m${gx},${gy}`);
     });
 }
@@ -373,7 +373,25 @@ function cmdAttack(units, target) {
 function cmdGatherTile(units, i) {
     const ro = RESOURCE_OBJECTS[objects[i]];
     if (!ro) return;
-    for (const u of units) if (u.def.cls === 'villager' && canWork(u)) { u.task = { type: 'gather', tile: i, res: ro.res }; u.path = []; }
+    const workers = units.filter(u => u.def.cls === 'villager' && canWork(u));
+    // A group spreads over the trees, stones or bushes next to the one clicked.
+    const tx = i % MAP_W;
+    const ty = Math.floor(i / MAP_W);
+    const spots = [];
+    for (let y = ty - 3; y <= ty + 3; y++) for (let x = tx - 3; x <= tx + 3; x++) {
+        if (!inMap(x, y)) continue;
+        const j = idx(x, y);
+        const r = RESOURCE_OBJECTS[objects[j]];
+        if (r && r.res === ro.res && ringAround(x, y, 1).length) spots.push({ j, d: Math.hypot(x - tx, y - ty), n: 0 });
+    }
+    if (!spots.length) spots.push({ j: i, d: 0, n: 0 });
+    for (const u of workers) {
+        spots.sort((a, b) => a.n - b.n || a.d - b.d);
+        const sp = spots[0];
+        sp.n += workers.length > 6 ? 0.5 : 1;
+        u.task = { type: 'gather', tile: sp.j, res: ro.res };
+        u.path = [];
+    }
 }
 
 function cmdGatherEnt(units, e) {
@@ -465,23 +483,53 @@ function step(dt) {
     }
 }
 
+// Keep people from standing inside each other without ever letting them block one another:
+// walkers pass through each other, idle people step aside for walkers, and only people
+// standing still are spread apart evenly.
 function separate() {
-    for (const list of G.grid.values()) {
-        if (list.length < 2) continue;
-        for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
+    for (const [k, list] of G.grid) {
+        const kx = k % MAP_W;
+        const ky = Math.floor(k / MAP_W);
+        // Also compare with the cells to the right and below so overlaps across tile edges count.
+        const near = list.concat(G.grid.get(idx(kx + 1, ky)) || [], G.grid.get(idx(kx, ky + 1)) || [], G.grid.get(idx(kx + 1, ky + 1)) || []);
+        if (near.length < 2) continue;
+        for (let i = 0; i < list.length; i++) for (let j = i + 1; j < near.length; j++) {
             const a = list[i];
-            const b = list[j];
+            const b = near[j];
+            if (a === b) continue;
+            const am = a.path.length > 0;
+            const bm = b.path.length > 0;
+            if (am && bm) continue;
             const dx = b.x - a.x;
             const dy = b.y - a.y;
             const d = Math.hypot(dx, dy) || 0.01;
-            const min = (a.radius + b.radius) * 0.9;
+            const min = (a.radius + b.radius) * 0.85;
             if (d >= min) continue;
-            const push = (min - d) * 0.5;
-            const nx = dx / d;
-            const ny = dy / d;
-            if (passable(Math.round(a.x - nx * push), Math.round(a.y - ny * push))) { a.x -= nx * push; a.y -= ny * push; }
-            if (passable(Math.round(b.x + nx * push), Math.round(b.y + ny * push))) { b.x += nx * push; b.y += ny * push; }
+            let nx = dx / d;
+            let ny = dy / d;
+            if (d < 0.02) { const r = ((a.id * 7 + b.id * 13) % 628) / 100; nx = Math.cos(r); ny = Math.sin(r); }
+            const gap = min - d;
+            const settled = u => u.working || (u.task && u.task.type === 'build' && !u.path.length);
+            if (am || bm) {
+                // A walker passes; an idle bystander shuffles aside, a busy worker is left alone.
+                const still = am ? b : a;
+                if (settled(still)) continue;
+                const sgn = still === b ? 1 : -1;
+                nudge(still, nx * sgn, ny * sgn, gap * 0.35);
+            } else {
+                nudge(a, -nx, -ny, gap * 0.5);
+                nudge(b, nx, ny, gap * 0.5);
+            }
         }
+    }
+}
+
+// Move a little in a direction, or sideways if that way is blocked.
+function nudge(u, nx, ny, amt) {
+    for (const [ax, ay] of [[nx, ny], [-ny, nx], [ny, -nx]]) {
+        const x = u.x + ax * amt;
+        const y = u.y + ay * amt;
+        if (passable(Math.round(x), Math.round(y))) { u.x = x; u.y = y; return; }
     }
 }
 
@@ -498,6 +546,16 @@ function moveAlong(u, dt) {
     if (u.person) { const a = ageOf(u); if (a < ADULT_AGE) sp *= 0.8; else if (a > ELDER_AGE + 8) sp *= 0.85; }
     u.facing = Math.atan2(dx, dy);
     u.moving = true;
+    // Notice when a walker makes no headway and find it a fresh route.
+    if (!u.stuck || u.stuck.wp !== u.path.length) u.stuck = { wp: u.path.length, best: d, t: G.time };
+    else if (d < u.stuck.best - 0.05) { u.stuck.best = d; u.stuck.t = G.time; }
+    else if (G.time - u.stuck.t > 1.2) {
+        u.stuck = null;
+        const goal = u.path[u.path.length - 1];
+        u.path = pathTo(u.x, u.y, [goal], goal[0], goal[1], 3000) || [];
+        if (!u.path.length) { u.moving = false; return; }
+        return;
+    }
     if (d <= sp) {
         u.x = tx;
         u.y = ty;
@@ -524,7 +582,12 @@ function updateUnit(u, dt, scan) {
         return;
     }
     if (t.type === 'move') {
-        if (!u.path.length) u.task = null;
+        if (!u.path.length) {
+            if (t.x !== undefined && Math.hypot(t.x - u.x, t.y - u.y) > 0.9 && t.tries++ < 3) {
+                const [gx, gy] = nearestPassable(t.x, t.y);
+                u.path = pathTo(u.x, u.y, [[gx, gy]], gx, gy) || [];
+            } else u.task = null;
+        }
     } else if (t.type === 'attack') {
         doAttack(u, t);
     } else if (t.type === 'gather') {
