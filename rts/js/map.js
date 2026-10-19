@@ -35,7 +35,7 @@ function passable(x, y) {
     const b = occ[i];
     if (b) {
         const e = G.ents.get(b);
-        if (e && !(e.def.walkable && e.built)) return false;
+        if (e && !(e.def.walkable && e.built) && !(e.def.gate && e.built && friendly(G.pathOwner, e.owner))) return false;
     }
     return true;
 }
@@ -116,41 +116,73 @@ function setupMap(seed, sizeKey, nPlayers) {
     occ = new Int32Array(N);
     resLeft = new Map();
     const starts = [];
-    const a0 = rng() * Math.PI * 2;
-    for (let p = 0; p < nPlayers; p++) {
-        const a = a0 + (p / nPlayers) * Math.PI * 2;
-        const tx = Math.round(MAP_W / 2 + Math.cos(a) * MAP_W * 0.31);
-        const ty = Math.round(MAP_H / 2 + Math.sin(a) * MAP_H * 0.31);
-        let best = [tx, ty];
-        let bestScore = -Infinity;
-        for (let dy = -14; dy <= 14; dy++) for (let dx = -14; dx <= 14; dx++) {
-            const x = tx + dx;
-            const y = ty + dy;
-            if (x < 9 || y < 9 || x > MAP_W - 10 || y > MAP_H - 10) continue;
-            let bad = 0;
-            for (let yy = -6; yy <= 6; yy++) for (let xx = -6; xx <= 6; xx++) {
-                const i = idx(x + xx, y + yy);
-                if (ground[i] === '~' || ground[i] === 'o' || objects[i] === 'M') bad++;
-            }
-            const score = -bad * 10 - Math.hypot(dx, dy);
-            if (score > bestScore) { bestScore = score; best = [x, y]; }
+    const good = (x, y) => {
+        if (x < 10 || y < 10 || x > MAP_W - 11 || y > MAP_H - 11) return false;
+        let bad = 0;
+        for (let yy = -5; yy <= 5; yy += 2) for (let xx = -5; xx <= 5; xx += 2) {
+            const i = idx(x + xx, y + yy);
+            if (ground[i] === '~' || ground[i] === 'o' || objects[i] === 'M') bad++;
         }
-        starts.push(best);
+        return bad <= 3;
+    };
+    if (nPlayers <= 4) {
+        const a0 = rng() * Math.PI * 2;
+        for (let p = 0; p < nPlayers; p++) {
+            const a = a0 + (p / nPlayers) * Math.PI * 2;
+            const tx = Math.round(MAP_W / 2 + Math.cos(a) * MAP_W * 0.31);
+            const ty = Math.round(MAP_H / 2 + Math.sin(a) * MAP_H * 0.31);
+            let best = [tx, ty];
+            let bestScore = -Infinity;
+            for (let dy = -14; dy <= 14; dy++) for (let dx = -14; dx <= 14; dx++) {
+                const x = tx + dx;
+                const y = ty + dy;
+                if (x < 9 || y < 9 || x > MAP_W - 10 || y > MAP_H - 10) continue;
+                let bad = 0;
+                for (let yy = -6; yy <= 6; yy++) for (let xx = -6; xx <= 6; xx++) {
+                    const i = idx(x + xx, y + yy);
+                    if (ground[i] === '~' || ground[i] === 'o' || objects[i] === 'M') bad++;
+                }
+                const score = -bad * 10 - Math.hypot(dx, dy);
+                if (score > bestScore) { bestScore = score; best = [x, y]; }
+            }
+            starts.push(best);
+        }
+    } else {
+        // Many kingdoms: spread capitals over the land, each as far as possible from the others.
+        const cands = [];
+        for (let y = 10; y < MAP_H - 10; y += 3) for (let x = 10; x < MAP_W - 10; x += 3) if (good(x, y)) cands.push([x, y]);
+        let first = cands[Math.floor(rng() * cands.length)];
+        starts.push(first);
+        const dmin = cands.map(([x, y]) => Math.hypot(x - first[0], y - first[1]));
+        while (starts.length < nPlayers && cands.length) {
+            let bi = 0;
+            for (let k = 1; k < cands.length; k++) if (dmin[k] > dmin[bi]) bi = k;
+            const pick = cands[bi];
+            starts.push(pick);
+            for (let k = 0; k < cands.length; k++) dmin[k] = Math.min(dmin[k], Math.hypot(cands[k][0] - pick[0], cands[k][1] - pick[1]));
+        }
     }
     for (const [x, y] of starts) clearArea(x, y, 7, '.');
 
-    // Roads join every base so no army is ever cut off by forest, river or peaks.
+    // Roads join each capital to its nearest neighbours so no army is ever cut off.
+    const joined = new Set();
+    const road = (a, b) => {
+        const key = a < b ? `${a},${b}` : `${b},${a}`;
+        if (joined.has(key)) return;
+        joined.add(key);
+        const path = findPath(starts[a][0], starts[a][1], starts[b][0], starts[b][1]);
+        if (path) carvePath(path);
+    };
     for (let p = 0; p < nPlayers; p++) {
-        const [ax, ay] = starts[p];
-        const [bx, by] = starts[(p + 1) % nPlayers];
-        if (nPlayers === 2 && p === 1) break;
-        const path = findPath(ax, ay, bx, by);
-        if (path) carvePath(path);
+        const order = starts.map((s2, q) => [q, Math.hypot(s2[0] - starts[p][0], s2[1] - starts[p][1])]).filter(([q]) => q !== p).sort((a, b) => a[1] - b[1]);
+        for (const [q] of order.slice(0, nPlayers <= 4 ? nPlayers - 1 : 2)) road(p, q);
     }
-    const center = [Math.floor(MAP_W / 2), Math.floor(MAP_H / 2)];
-    for (const [x, y] of starts) {
-        const path = findPath(x, y, center[0], center[1]);
-        if (path) carvePath(path);
+    if (nPlayers <= 4) {
+        const center = [Math.floor(MAP_W / 2), Math.floor(MAP_H / 2)];
+        for (const [x, y] of starts) {
+            const path = findPath(x, y, center[0], center[1]);
+            if (path) carvePath(path);
+        }
     }
 
     for (const [x, y] of starts) {
@@ -169,6 +201,31 @@ function setupMap(seed, sizeKey, nPlayers) {
             placeCluster(rng, wood[0], wood[1], tree, 26, avoid);
         }
     }
+    // Independent villages waiting to be won over.
+    const villages = [];
+    const want = Math.max(nPlayers + 2, Math.round((MAP_W * MAP_H) / 1500));
+    for (let tries = 0; tries < want * 60 && villages.length < want; tries++) {
+        const x = 8 + Math.floor(rng() * (MAP_W - 16));
+        const y = 8 + Math.floor(rng() * (MAP_H - 16));
+        if (!good(x, y)) continue;
+        if (starts.some(([sx, sy]) => Math.hypot(sx - x, sy - y) < 16)) continue;
+        if (villages.some(([vx, vy]) => Math.hypot(vx - x, vy - y) < 13)) continue;
+        clearArea(x, y, 4, '.');
+        villages.push([x, y]);
+        // Each village has its own fields of berries and a grove.
+        const avoid = [[x, y, 3.5]];
+        const b2 = ringPoint(rng, x, y, 4, 6, avoid);
+        placeCluster(rng, b2[0], b2[1], '*', 4, avoid);
+    }
+    // Join villages to the nearest capital road network.
+    for (const [x, y] of villages) {
+        let best = 0;
+        let bd = Infinity;
+        starts.forEach(([sx, sy], k) => { const d = Math.hypot(sx - x, sy - y); if (d < bd) { bd = d; best = k; } });
+        if (bd < 60) { const path = findPath(x, y, starts[best][0], starts[best][1]); if (path) carvePath(path); }
+    }
+    G.villageSpots = villages;
+
     // Contested riches out in the wild.
     const extra = Math.round((MAP_W * MAP_H) / 1300);
     for (let k = 0; k < extra; k++) {
@@ -310,7 +367,7 @@ function updateFog() {
     fogVisible.fill(0);
     const bonus = hasTech(G.human, 'jyotisha') ? 2 : 0;
     for (const e of G.ents.values()) {
-        if (e.owner !== G.human || e.dead) continue;
+        if (e.dead || e.owner < 0 || (e.owner !== G.human && relation(G.human, e.owner) !== 'ally')) continue;
         const r = (e.def.sight || 4) + bonus + (e.kind === 'building' ? e.def.size / 2 : 0);
         const cx = e.x;
         const cy = e.y;
@@ -326,7 +383,55 @@ function updateFog() {
 
 function seenByHuman(e) {
     if (e.owner === G.human || G.revealAll) return true;
+    if (e.owner >= 0 && relation(G.human, e.owner) === 'ally') return true;
     const i = idx(Math.round(e.x), Math.round(e.y));
     if (e.kind === 'building') return !!fogExplored[i];
     return !!fogVisible[i];
+}
+
+// ---------- Territory ----------
+
+let territory = null;     // owner + 1 for each tile, 0 when unclaimed
+
+function territoryRadius(e) {
+    if (e.kind !== 'building' || !e.built || e.dead || e.owner < 0) return 0;
+    if (e.type === 'village') return SETTLEMENT_LEVELS[e.level].radius;
+    return TERRITORY[e.type] || 0;
+}
+
+function updateTerritory() {
+    const N = MAP_W * MAP_H;
+    if (!territory || territory.length !== N) territory = new Uint8Array(N);
+    const best = new Float32Array(N).fill(1e9);
+    territory.fill(0);
+    for (const e of G.ents.values()) {
+        const r = territoryRadius(e);
+        if (!r) continue;
+        const cx = e.x;
+        const cy = e.y;
+        for (let y = Math.max(0, Math.floor(cy - r)); y <= Math.min(MAP_H - 1, Math.ceil(cy + r)); y++) {
+            for (let x = Math.max(0, Math.floor(cx - r)); x <= Math.min(MAP_W - 1, Math.ceil(cx + r)); x++) {
+                const d = Math.hypot(x - cx, y - cy) / r;
+                if (d > 1) continue;
+                const i = idx(x, y);
+                if (d < best[i]) { best[i] = d; territory[i] = e.owner + 1; }
+            }
+        }
+    }
+    G.territoryAt = G.time;
+}
+
+function territoryOwner(x, y) {
+    if (!territory || !inMap(x, y)) return -1;
+    return territory[idx(x, y)] - 1;
+}
+
+// May this kingdom build here? Own land or unclaimed wilderness, never inside another's border.
+function mayBuild(owner, type, tx, ty) {
+    const n = BUILDING_TYPES[type].size;
+    for (let y = ty; y < ty + n; y++) for (let x = tx; x < tx + n; x++) {
+        const t = territoryOwner(x, y);
+        if (t >= 0 && t !== owner) return false;
+    }
+    return true;
 }

@@ -10,7 +10,7 @@ const AI_LEVELS = {
 
 function newAI(p, difficulty) {
     const L = AI_LEVELS[difficulty] || AI_LEVELS.normal;
-    return { ...L, level: difficulty, nextAttack: L.firstAttack, waves: 0, attacking: false, target: null };
+    return { ...L, level: difficulty, nextAttack: L.firstAttack, waves: 0, attacking: false, target: null, capture: null, peaceUntil: L.firstAttack * 0.6, maxWars: difficulty === 'hard' ? 2 : 1, warLust: difficulty === 'easy' ? 0.15 : difficulty === 'hard' ? 0.45 : 0.3 };
 }
 
 function aiNewUnit(p, u) {
@@ -38,8 +38,10 @@ function aiMine(p) {
             out.byType[e.type] = (out.byType[e.type] || 0) + 1;
             if (!e.built) out.pending[e.type] = (out.pending[e.type] || 0) + 1;
             if (e.type === 'tc' && (!out.tc || e.built)) out.tc = e;
+            if (e.type === 'village' && !out.village) out.village = e;
         }
     }
+    if (!out.tc && out.village) out.tc = out.village;
     return out;
 }
 
@@ -127,7 +129,7 @@ function aiThink(p) {
     }
 
     // Buildings for each age.
-    const want = [['barracks', 0, 9], ['storehouse', 0, 7], ['shmashan', 0, 11], ['well', 0, 14], ['panchayat', 1, 0], ['range', 1, 0], ['university', 1, 0], ['stable', 1, 0], ['temple', 1, 0], ['gurukul', 1, 0], ['tower', 1, 0], ['gajashala', 2, 0], ['workshop', 2, 0], ['barracks', 2, 0], ['tower', 2, 0]];
+    const want = [['barracks', 0, 9], ['storehouse', 0, 7], ['shmashan', 0, 11], ['well', 0, 14], ['thana', 0, 16], ['panchayat', 1, 0], ['karyalaya', 1, 0], ['range', 1, 0], ['university', 1, 0], ['stable', 1, 0], ['temple', 1, 0], ['gurukul', 1, 0], ['tower', 1, 0], ['gajashala', 2, 0], ['workshop', 2, 0], ['barracks', 2, 0], ['tower', 2, 0]];
     const seen = {};
     for (const [type, age, vills] of farmFirst ? [] : want) {
         seen[type] = (seen[type] || 0) + 1;
@@ -222,7 +224,7 @@ function aiGather(p, me, v, res) {
         // Hunt, then berries, then farms.
         let best = null;
         let bd = 14;
-        for (const e of G.ents.values()) {
+        for (const e of nearbyEnts(me.tc.x, me.tc.y, 14)) {
             if (e.dead) continue;
             const ok = (e.kind === 'carcass' && e.food > 0) || (e.kind === 'unit' && e.def.cls === 'animal' && e.type === 'deer');
             if (!ok) continue;
@@ -264,45 +266,83 @@ function aiMilitary(p, me, reserveAge) {
         if (pick && canAffordAfter(p, unitCost(p.id, pick), keep)) enqueue(b, { unit: pick });
     }
 
-    // Defend the town from raiders.
-    const threats = [];
-    for (const e of G.ents.values()) {
-        if (e.kind !== 'unit' || e.dead || e.owner === p.id || e.owner < 0) continue;
-        if (Math.hypot(e.x - p.start[0], e.y - p.start[1]) < 16) threats.push(e);
-    }
-    if (threats.length) {
-        for (const u of me.army) if (!u.task || u.task.auto || u.task.type === 'move') {
-            const t = threats.reduce((a, b) => (Math.hypot(a.x - u.x, a.y - u.y) < Math.hypot(b.x - u.x, b.y - u.y) ? a : b));
-            cmdAttack([u], t);
-        }
-        if (threats.length > me.army.length + 2) {
-            // Villagers take up arms when the town is overwhelmed.
-            for (const v of me.vills) if (threats.some(t => Math.hypot(t.x - v.x, t.y - v.y) < 4)) cmdAttack([v], threats[0]);
-        }
+    // Under attack: the realm's alarm system rallies soldiers; ring the bell when outnumbered.
+    if (p.threat) {
+        if (p.threat.n > me.army.length + 2 && !p.alarm) soundAlarm(p.id, true);
         return;
     }
 
-    // Send attack waves.
+    // Police guards from among the villagers once there is a police post.
+    if (me.byType.thana) {
+        const guards = me.vills.filter(v => v.guard).length;
+        const want = Math.min(6, Math.floor(me.vills.length / 8));
+        if (guards < want) { const v = me.vills.find(v => !v.guard && !isChild(v)); if (v) v.guard = true; }
+    }
+
+    // Grow the realm's villages into towns and cities when rich.
+    for (const v of me.buildings) {
+        if (v.type !== 'village') continue;
+        const next = SETTLEMENT_LEVELS[v.level + 1];
+        if (next && p.age >= next.age && canAffordAfter(p, next.cost, keep) && Math.random() < 0.2) developSettlement(p.id, v);
+    }
+
+    // A fort on the border facing the nearest enemy.
+    if (p.age >= 2 && !me.byType.fort && !me.pending.fort) {
+        const foe = G.players.filter(q => areEnemies(p.id, q.id) && !q.defeated).sort((a, b) => Math.hypot(a.start[0] - p.start[0], a.start[1] - p.start[1]) - Math.hypot(b.start[0] - p.start[0], b.start[1] - p.start[1]))[0];
+        if (foe) {
+            const dx = foe.start[0] - p.start[0];
+            const dy = foe.start[1] - p.start[1];
+            const d = Math.hypot(dx, dy) || 1;
+            aiBuild(p, me, 'fort', [Math.round(p.start[0] + dx / d * 9), Math.round(p.start[1] + dy / d * 9)], 0, 7, 3);
+        }
+    }
+
+    const free = me.army.filter(u => !u.task || u.task.type === 'move' || (u.task.auto && !u.task.defend));
+
+    // Send attack waves against kingdoms at war with us.
     if (G.time > ai.nextAttack && me.army.length >= ai.wave + ai.waves * 2) {
-        ai.waves++;
-        ai.nextAttack = G.time + ai.gap;
         const target = aiTarget(p);
         if (target) {
+            ai.waves++;
+            ai.nextAttack = G.time + ai.gap;
             for (const u of me.army) cmdAttack([u], target);
             ai.target = target.id;
             ai.attacking = true;
-            if (target.owner === G.human) say(`${p.name} is marching on you!`, 'bad');
+            if (target.owner === G.human) say(`${CIVS[p.civ].name} is marching on you!`, 'bad');
+            return;
         }
     }
     if (ai.attacking) {
         const t = G.ents.get(ai.target);
-        if (!t || t.dead) {
+        if (!t || t.dead || !areEnemies(p.id, t.owner)) {
             const next = aiTarget(p);
-            if (next && me.army.length >= 3) { ai.target = next.id; for (const u of me.army) if (!u.task || u.task.auto === undefined) cmdAttack([u], next); }
+            if (next && me.army.length >= 3) { ai.target = next.id; for (const u of free) cmdAttack([u], next); }
             else ai.attacking = false;
         } else {
             for (const u of me.army) if (!u.task) cmdAttack([u], t);
         }
+        return;
+    }
+
+    // Expand: march on the nearest independent or enemy-held settlement and win it over.
+    const goal = ai.capture && G.ents.get(ai.capture.id);
+    if (goal && (goal.owner === p.id || G.time - ai.capture.at > 180 || (goal.owner >= 0 && !areEnemies(p.id, goal.owner)))) ai.capture = null;
+    if (!ai.capture && free.length >= 4 && G.time > ai.firstAttack * 0.5) {
+        const homes = settlementsOf(p.id);
+        let best = null;
+        let bd = 55;
+        for (const v of G.ents.values()) {
+            if (v.type !== 'village' || v.dead || v.owner === p.id) continue;
+            if (v.owner >= 0 && !areEnemies(p.id, v.owner)) continue;
+            const d = Math.min(...homes.map(h => Math.hypot(h.x - v.x, h.y - v.y))) + (v.owner >= 0 ? 6 : 0) + v.level * 3;
+            if (d < bd) { bd = d; best = v; }
+        }
+        if (best) ai.capture = { id: best.id, at: G.time };
+    }
+    if (ai.capture) {
+        const v = G.ents.get(ai.capture.id);
+        const party = free.slice(0, Math.max(4, Math.ceil(free.length * 0.75)));
+        for (const u of party) if (Math.hypot(u.x - v.x, u.y - v.y) > 4 && (!u.task || u.task.type !== 'move')) cmdMove([u], v.x + (Math.random() - 0.5) * 3, v.y + 2 + (Math.random() - 0.5) * 2);
     }
 }
 
@@ -311,9 +351,9 @@ function aiTarget(p) {
     let best = null;
     let bd = Infinity;
     for (const e of G.ents.values()) {
-        if (e.kind !== 'building' || e.dead || e.owner < 0 || e.owner === p.id || player(e.owner).defeated) continue;
+        if (e.kind !== 'building' || e.dead || !areEnemies(p.id, e.owner) || player(e.owner).defeated || e.type === 'village' || e.type === 'wall') continue;
         // Prefer the human a little so the player always sees action.
-        const d = Math.hypot(e.x - sx, e.y - sy) * (e.owner === G.human ? 0.8 : 1) + (e.type === 'tower' ? 8 : 0);
+        const d = Math.hypot(e.x - sx, e.y - sy) * (e.owner === G.human ? 0.85 : 1) + (e.type === 'tower' || e.type === 'fort' ? 10 : 0);
         if (d < bd) { bd = d; best = e; }
     }
     return best;

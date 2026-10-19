@@ -15,9 +15,11 @@ function shuffled(arr, rng) {
 }
 
 function newGame(opts) {
-    const n = 1 + opts.opponents;
+    const n = Math.max(2, Math.min(MAX_KINGDOMS, opts.kingdoms || 1 + opts.opponents));
     G = { time: 0, ents: new Map(), nextId: 1, players: [], human: 0, over: null, messages: [], revealAll: false, grid: new Map(), opts, alertAt: 0, housedAt: 0, fogClock: 0, aiClock: 0, scanClock: 0, projectiles: [], booms: [] };
     fogVisible = null;
+    territory = null;
+    initRelations(n);
     const starts = setupMap(opts.seed, opts.size, n);
     const rng = WORLD.rng;
     const others = shuffled(Object.keys(CIVS).filter(k => k !== opts.civ), rng);
@@ -52,8 +54,21 @@ function newGame(opts) {
         if (!passable(x, y) || starts.some(([sx, sy]) => Math.hypot(sx - x, sy - y) < 12)) continue;
         for (let d = 0; d < 3; d++) if (passable(x + d, y)) spawnUnit(-1, k % 4 === 0 ? 'boar' : 'deer', x + d, y);
     }
+    foundVillages();
+    // A few friendships to begin with: the human's nearest neighbour, and some pairs of computer kingdoms.
+    if (n >= 4) {
+        const near = G.players.slice(1).sort((a, b) => Math.hypot(a.start[0] - starts[0][0], a.start[1] - starts[0][1]) - Math.hypot(b.start[0] - starts[0][0], b.start[1] - starts[0][1]));
+        setRelation(0, near[0].id, 'ally');
+        const free = G.players.slice(1).filter(p => p.id !== near[0].id);
+        for (let k = 0; k + 1 < free.length; k += 3) setRelation(free[k].id, free[k + 1].id, 'ally');
+    } else {
+        // In a small duel everyone is at war from the start.
+        for (const a of G.players) for (const b of G.players) if (a.id < b.id) setRelation(a.id, b.id, 'enemy');
+    }
+    updateTerritory();
     updateFog();
     say(`You lead the ${CIVS[opts.civ].name}. ${CIVS[opts.civ].bonus}`, 'info');
+    if (n >= 4) say(`${n} kingdoms share this land. Your neighbour ${CIVS[G.players.find(p => relation(0, p.id) === 'ally').civ].name} is your ally; the others are neutral for now.`, 'info');
 }
 
 function makeEnt(o) {
@@ -64,6 +79,10 @@ function makeEnt(o) {
 
 function player(owner) {
     return G.players[owner];
+}
+
+function civKind(owner) {
+    return owner >= 0 ? CIVS[G.players[owner].civ].kind : null;
 }
 
 function hasTech(owner, t) {
@@ -81,13 +100,13 @@ function unitHpMult(owner, type) {
     if (owner < 0) return 1;
     const cls = UNIT_TYPES[type].cls;
     let m = hasTech(owner, 'ayurveda') ? 1.2 : 1;
-    if (player(owner).civ === 'rajput' && (cls === 'cavalry' || cls === 'elephant')) m *= 1.15;
+    if (civKind(owner) === 'mounted' && (cls === 'cavalry' || cls === 'elephant')) m *= 1.15;
     return m;
 }
 
 function unitCost(owner, type) {
     const def = UNIT_TYPES[type];
-    const cheap = player(owner).civ === 'maratha' && ['infantry', 'cavalry', 'archer'].includes(def.cls);
+    const cheap = civKind(owner) === 'thrift' && ['infantry', 'cavalry', 'archer'].includes(def.cls);
     return Object.fromEntries(Object.entries(def.cost).map(([k, v]) => [k, Math.round(v * (cheap ? 0.85 : 1))]));
 }
 
@@ -95,6 +114,8 @@ function unitAtk(u) {
     let a = u.def.atk;
     if (u.owner < 0) return a;
     if (u.person) a *= (1 + rankOf(u) * 0.1) * (u.def.cls === 'villager' ? 1 + u.person.skills.fight / 60 : 1) * (isChild(u) ? 0.4 : 1);
+    if (u.guard) a = (a + 2) * officerBonus(u.owner, 'police');
+    if (u.def.cls !== 'villager') a *= officerBonus(u.owner, 'fight');
     if (hasTech(u.owner, 'wootz') && ['infantry', 'cavalry', 'elephant'].includes(u.def.cls)) a += 2;
     if (hasTech(u.owner, 'dhanurveda') && u.def.missile === 'arrow') a += 1;
     return a;
@@ -103,6 +124,7 @@ function unitAtk(u) {
 function unitRange(u) {
     let r = u.def.range;
     if (u.owner >= 0 && hasTech(u.owner, 'dhanurveda') && u.def.missile === 'arrow') r += 1;
+    if (civKind(u.owner) === 'archers' && u.def.missile === 'arrow') r += 1;
     return r;
 }
 
@@ -110,14 +132,16 @@ function armourOf(e, pierce) {
     if (e.kind === 'building') return pierce ? 6 : 2;
     let a = e.def.arm[pierce ? 1 : 0];
     if (e.owner >= 0 && hasTech(e.owner, 'ironarmour') && e.def.cls !== 'villager' && e.def.cls !== 'siege') a += 1;
+    if (e.guard && hasBuilt(e.owner, 'thana')) a += 1;
     return a;
 }
 
 function gatherMult(owner, res, farm) {
     const p = player(owner);
     let m = 1;
-    if (p.civ === 'chola' && res === 'food') m *= 1.15;
-    if (p.civ === 'maurya' && (res === 'gold' || res === 'stone')) m *= 1.15;
+    if (civKind(owner) === 'farming' && res === 'food') m *= 1.15;
+    if (civKind(owner) === 'forest' && res === 'wood') m *= 1.15;
+    if (civKind(owner) === 'mining' && (res === 'gold' || res === 'stone')) m *= 1.15;
     if (res === 'wood' && hasTech(owner, 'bowsaw')) m *= 1.2;
     if ((res === 'gold' || res === 'stone') && hasTech(owner, 'mining')) m *= 1.2;
     if (farm && hasTech(owner, 'plough')) m *= 1.15;
@@ -129,7 +153,7 @@ function gatherMult(owner, res, farm) {
 }
 
 function buildMult(owner) {
-    let m = player(owner).civ === 'vijayanagara' ? 1.2 : 1;
+    let m = civKind(owner) === 'builders' ? 1.2 : 1;
     if (hasTech(owner, 'nalanda')) m *= 1.15;
     return m;
 }
@@ -145,17 +169,21 @@ function pay(owner, cost, sign = 1) {
 }
 
 function popOf(owner) {
+    if (G.popCache && G.popCache[owner]) return G.popCache[owner];
     let used = 0;
     let cap = 0;
     for (const e of G.ents.values()) {
         if (e.owner !== owner || e.dead) continue;
         if (e.kind === 'unit') used++;
         else if (e.kind === 'building') {
-            if (e.built && e.def.pop) cap += e.def.pop + (e.type === 'house' && hasTech(owner, 'pucca') ? 3 : 0);
+            if (e.built && e.def.pop) cap += e.type === 'village' ? SETTLEMENT_LEVELS[e.level].pop : e.def.pop + (e.type === 'house' && hasTech(owner, 'pucca') ? 3 : 0);
             if (e.queue.length && e.queue[0].unit) used++;
         }
     }
-    return { used, cap: Math.min(POP_MAX + (hasTech(owner, 'nalanda') ? 25 : 0), cap) };
+    const out = { used, cap: Math.min(POP_MAX + (hasTech(owner, 'nalanda') ? 25 : 0), cap) };
+    if (!G.popCache) G.popCache = {};
+    G.popCache[owner] = out;
+    return out;
 }
 
 function ageReady(owner) {
@@ -182,7 +210,7 @@ function spawnUnit(owner, type, x, y, opts) {
 function placeBuilding(owner, type, tx, ty, done) {
     const def = BUILDING_TYPES[type];
     const n = def.size;
-    const hp = Math.round(def.hp * (owner >= 0 && player(owner).civ === 'vijayanagara' ? 1.25 : 1) * (owner >= 0 ? upgradeHpMult(owner, type) : 1));
+    const hp = Math.round(def.hp * (owner >= 0 && civKind(owner) === 'builders' ? 1.25 : 1) * (owner >= 0 ? upgradeHpMult(owner, type) : 1));
     const e = makeEnt({ kind: 'building', type, def, owner, tx, ty, x: tx + (n - 1) / 2, y: ty + (n - 1) / 2, hp: done ? hp : 1, maxHp: hp, built: !!done, progress: done ? 1 : 0, queue: [], rally: null, cooldown: 0, food: def.food || 0, radius: n / 2 });
     for (let y = ty; y < ty + n; y++) for (let x = tx; x < tx + n; x++) occ[idx(x, y)] = e.id;
     if (done) onBuilt(e);
@@ -235,8 +263,8 @@ function kill(e, src, cause) {
         if (e.owner >= 0) for (const q of e.queue) pay(e.owner, q.cost, -1);
         e.queue = [];
     }
-    if (e.owner === G.human && e.kind === 'building') say(`Your ${e.def.name.toLowerCase()} was destroyed!`, 'bad');
-    checkDefeat();
+    if (e.owner === G.human && e.kind === 'building' && e.type !== 'wall') say(`Your ${e.def.name.toLowerCase()} was destroyed!`, 'bad');
+    G.defeatDirty = true;
 }
 
 function checkDefeat() {
@@ -247,19 +275,26 @@ function checkDefeat() {
         let army = 0;
         for (const e of G.ents.values()) {
             if (e.owner !== p.id || e.dead) continue;
-            if (e.type === 'tc') tc++;
+            if (e.type === 'tc' || e.type === 'village' || e.type === 'fort') tc++;
             else if (e.type === 'villager') vill++;
             else if (e.kind === 'unit') army++;
         }
         if (!tc && !vill && (!army || p.id === G.human)) {
             p.defeated = true;
             say(p.id === G.human ? 'Your kingdom has fallen.' : `${p.name} has been defeated!`, p.id === G.human ? 'bad' : 'good');
-            for (const e of G.ents.values()) if (e.owner === p.id && !e.dead && p.id !== G.human) kill(e, null);
+            for (const e of G.ents.values()) {
+                if (e.owner !== p.id || e.dead || p.id === G.human) continue;
+                if (e.type === 'village') { e.owner = -2; e.militia = 6; continue; }
+                kill(e, null);
+            }
         }
     }
     if (G.over) return;
-    if (player(G.human).defeated) G.over = 'defeat';
-    else if (G.players.every(p => p.id === G.human || p.defeated)) G.over = 'victory';
+    if (player(G.human).defeated) { G.over = 'defeat'; return; }
+    // Victory: every kingdom still standing is your ally, or you rule two thirds of all settlements.
+    if (G.players.every(p => p.id === G.human || p.defeated || relation(G.human, p.id) === 'ally')) { G.over = 'victory'; G.victoryKind = 'conquest'; return; }
+    const all = [...G.ents.values()].filter(e => !e.dead && (e.type === 'village' || e.type === 'tc'));
+    if (all.length >= 6 && all.filter(e => e.owner === G.human).length >= all.length * 2 / 3) { G.over = 'victory'; G.victoryKind = 'empire'; }
 }
 
 // ---------- Geometry helpers ----------
@@ -316,17 +351,27 @@ function unitsNearTile(x, y) {
     return G.grid.get(idx(Math.round(x), Math.round(y))) || [];
 }
 
+// Search outward ring by ring so the nearest resource is found without scanning the whole square.
 function nearestResTile(res, x, y, r) {
+    const cx = Math.round(x);
+    const cy = Math.round(y);
     let best = -1;
     let bd = Infinity;
-    for (let yy = Math.round(y) - r; yy <= Math.round(y) + r; yy++) for (let xx = Math.round(x) - r; xx <= Math.round(x) + r; xx++) {
-        if (!inMap(xx, yy)) continue;
-        const i = idx(xx, yy);
-        const ro = RESOURCE_OBJECTS[objects[i]];
-        if (!ro || ro.res !== res) continue;
-        if (!ringAround(xx, yy, 1).length) continue;
-        const d = Math.hypot(xx - x, yy - y);
-        if (d < bd) { bd = d; best = i; }
+    for (let k = 0; k <= r; k++) {
+        if (k > bd + 1) break;
+        for (let yy = cy - k; yy <= cy + k; yy++) {
+            const edge = yy === cy - k || yy === cy + k;
+            for (let xx = cx - k; xx <= cx + k; xx += edge ? 1 : 2 * k || 1) {
+                if (!inMap(xx, yy)) continue;
+                const i = idx(xx, yy);
+                const ro = RESOURCE_OBJECTS[objects[i]];
+                if (!ro || ro.res !== res) continue;
+                const d = Math.hypot(xx - x, yy - y);
+                if (d >= bd || !ringAround(xx, yy, 1).length) continue;
+                bd = d;
+                best = i;
+            }
+        }
     }
     return best;
 }
@@ -343,7 +388,7 @@ function nearestDrop(owner, res, x, y) {
 }
 
 function isEnemy(a, b) {
-    return b.owner !== a.owner && b.owner >= 0 && a.owner >= 0 && !b.dead;
+    return !b.dead && areEnemies(a.owner, b.owner);
 }
 
 // ---------- Commands (used by the player interface and the AI) ----------
@@ -360,9 +405,17 @@ function cmdMove(units, x, y) {
     });
 }
 
+// Villagers, foot soldiers and archers can all gather and build when there is no fighting to do.
+function canGather(u) {
+    return (u.def.cls === 'villager' || u.def.cls === 'infantry' || u.def.cls === 'archer') && canWork(u);
+}
+
 function cmdAttack(units, target) {
+    if (target.type === 'village') { cmdMove(units, target.x, target.y + 2); return; }
     for (const u of units) {
         if (!canWork(u)) continue;
+        if (u.owner === G.human && target.owner >= 0 && relation(u.owner, target.owner) === 'neutral') declareWar(u.owner, target.owner);
+        if (target.owner >= 0 && relation(u.owner, target.owner) === 'ally') continue;
         if (u.def.cls === 'villager' && target.def.cls === 'animal') { u.task = { type: 'gather', ent: target.id, res: 'food', hunt: true }; continue; }
         if (u.def.onlyBuildings && target.kind !== 'building') continue;
         u.task = { type: 'attack', ent: target.id };
@@ -373,7 +426,7 @@ function cmdAttack(units, target) {
 function cmdGatherTile(units, i) {
     const ro = RESOURCE_OBJECTS[objects[i]];
     if (!ro) return;
-    const workers = units.filter(u => u.def.cls === 'villager' && canWork(u));
+    const workers = units.filter(canGather);
     // A group spreads over the trees, stones or bushes next to the one clicked.
     const tx = i % MAP_W;
     const ty = Math.floor(i / MAP_W);
@@ -395,11 +448,11 @@ function cmdGatherTile(units, i) {
 }
 
 function cmdGatherEnt(units, e) {
-    for (const u of units) if (u.def.cls === 'villager' && canWork(u)) { u.task = { type: 'gather', ent: e.id, res: 'food', hunt: e.kind === 'unit' }; u.path = []; }
+    for (const u of units) if (canGather(u)) { u.task = { type: 'gather', ent: e.id, res: 'food', hunt: e.kind === 'unit' }; u.path = []; }
 }
 
 function cmdBuild(units, b) {
-    for (const u of units) if (u.def.cls === 'villager' && !isChild(u)) { u.task = { type: 'build', ent: b.id }; u.path = []; }
+    for (const u of units) if (canGather(u) && !isChild(u)) { u.task = { type: 'build', ent: b.id }; u.path = []; }
 }
 
 function cmdDrop(units, b) {
@@ -408,7 +461,7 @@ function cmdDrop(units, b) {
 
 function tryPlace(owner, type, tx, ty, builders) {
     const def = BUILDING_TYPES[type];
-    if (def.age > player(owner).age || !canAfford(owner, def.cost) || !footprintFree(type, tx, ty)) return null;
+    if (def.age > player(owner).age || !canAfford(owner, def.cost) || !footprintFree(type, tx, ty) || !mayBuild(owner, type, tx, ty)) return null;
     pay(owner, def.cost);
     const b = placeBuilding(owner, type, tx, ty, false);
     cmdBuild(builders, b);
@@ -452,6 +505,8 @@ function cancelQueue(b, k) {
 function step(dt) {
     if (G.over) return;
     G.time += dt;
+    rebuildCells();
+    G.popCache = null;
     G.grid = new Map();
     for (const e of G.ents.values()) {
         if (e.kind !== 'unit' || e.dead) continue;
@@ -474,13 +529,22 @@ function step(dt) {
     separate();
     updateProjectiles(dt);
     lifeTick(dt);
+    realmTick(dt);
     G.fogClock += dt;
     if (G.fogClock > 0.25) { G.fogClock = 0; updateFog(); }
+    // Computer kingdoms think about once a second, spread over the frames.
     G.aiClock += dt;
-    if (G.aiClock > 1) {
-        G.aiClock = 0;
-        for (const p of G.players) if (p.ai && !p.defeated) aiThink(p);
+    const ais = G.players.filter(p => p.ai && !p.defeated);
+    if (ais.length) {
+        const per = 1 / ais.length;
+        while (G.aiClock >= per) {
+            G.aiClock -= per;
+            G.aiTurn = ((G.aiTurn || 0) + 1) % ais.length;
+            aiThink(ais[G.aiTurn]);
+        }
     }
+    G.defeatClock = (G.defeatClock || 0) + dt;
+    if (G.defeatDirty && G.defeatClock > 1) { G.defeatClock = 0; G.defeatDirty = false; checkDefeat(); }
 }
 
 // Keep people from standing inside each other without ever letting them block one another:
@@ -573,8 +637,14 @@ function faceTo(u, x, y) {
 function updateUnit(u, dt, scan) {
     u.cooldown -= dt;
     u.working = null;
+    u.studying = false;
+    G.pathOwner = u.owner;
     if (u.def.cls === 'animal') return updateAnimal(u, dt);
-    if (u.person && ageOf(u) < WORK_AGE) return toddle(u, dt);
+    if (u.person && u.def.cls === 'villager') {
+        const stage = stageOf(u);
+        if (stage === 'infant') return toddle(u, dt);
+        if ((stage === 'school' || stage === 'college') && !u.task) return doStudy(u, dt, stage);
+    }
     const t = u.task;
     if (!t) {
         if (scan && u.def.cls !== 'villager') autoTarget(u);
@@ -603,8 +673,8 @@ function autoTarget(u) {
     const sight = u.def.sight + 1;
     let best = null;
     let bd = Infinity;
-    for (const e of G.ents.values()) {
-        if (!isEnemy(u, e) || e.kind === 'carcass') continue;
+    for (const e of nearbyEnts(u.x, u.y, sight + 2)) {
+        if (!isEnemy(u, e) || e.kind === 'carcass' || e.type === 'village') continue;
         if (u.def.onlyBuildings && e.kind !== 'building') continue;
         const d = distToEnt(u, e) + (e.kind === 'building' ? 3 : 0);
         if (d < sight && d < bd) { bd = d; best = e; }
@@ -652,7 +722,7 @@ function strike(u, e) {
 }
 
 function applyDamage(e, d, src) {
-    if (e.dead) return;
+    if (e.dead || e.type === 'village') return;
     e.hp -= d;
     e.hitAt = G.time;
     if (e.owner === G.human && src && src.owner !== G.human && G.time - G.alertAt > 12) {
@@ -823,7 +893,9 @@ function gatherTick(u, dt) {
     if (!u.carry) u.carry = { res, amt: 0 };
     let rate = (w.farm ? GATHER_RATE.farm : w.ent ? GATHER_RATE.hunt : GATHER_RATE[res]) * gatherMult(u.owner, res, w.farm) * personWorkMult(u, res);
     if (w.farm && wellNear(w.ent)) rate *= 1.1;
-    gainSkill(u, res, dt * 0.09);
+    if (u.def.cls !== 'villager') rate *= 0.8;
+    rate *= officerBonus(u.owner, res);
+    gainSkill(u, res, dt * 0.09 * (officerOf(u.owner, res) ? 1.25 : 1));
     let got = 0;
     if (w.tile !== undefined) got = takeRes(w.tile, rate * dt);
     else if (w.ent) { got = Math.min(rate * dt, w.ent.food); w.ent.food -= got; }
@@ -869,7 +941,10 @@ function doBuild(u, t, dt) {
     if (!b || b.dead || (b.built && b.hp >= b.maxHp)) {
         u.task = null;
         u.path = [];
-        if (b && !b.dead && b.type === 'farm' && !farmTaken(b, u)) u.task = { type: 'gather', ent: b.id, res: 'food' };
+        // Walls go up piece by piece: carry on with the next unfinished piece nearby.
+        const next = b && b.def.line ? [...nearbyEnts(b.x, b.y, 4)].filter(e => e.kind === 'building' && !e.built && !e.dead && e.owner === u.owner && e.def.line).sort((a, c) => Math.hypot(a.x - u.x, a.y - u.y) - Math.hypot(c.x - u.x, c.y - u.y))[0] : null;
+        if (next) u.task = { type: 'build', ent: next.id };
+        else if (b && !b.dead && b.type === 'farm' && !farmTaken(b, u)) u.task = { type: 'gather', ent: b.id, res: 'food' };
         else if (b && !b.dead && b.def.drop && b.type !== 'tc') {
             const next = ['wood', 'gold', 'stone'].map(r => nearestResTile(r, b.x, b.y, 6)).find(i => i >= 0);
             if (next !== undefined) u.task = { type: 'gather', tile: next, res: RESOURCE_OBJECTS[objects[next]].res };
@@ -881,7 +956,7 @@ function doBuild(u, t, dt) {
         u.path = [];
         faceTo(u, b.x, b.y);
         u.building = G.time;
-        const rate = (dt / b.def.time) * buildMult(u.owner) * (player(u.owner).ai ? player(u.owner).ai.eco : 1) * personWorkMult(u, 'build');
+        const rate = (dt / b.def.time) * buildMult(u.owner) * (player(u.owner).ai ? player(u.owner).ai.eco : 1) * personWorkMult(u, 'build') * officerBonus(u.owner, 'build');
         gainSkill(u, 'build', dt * 0.12);
         if (!b.built) {
             b.progress = Math.min(1, b.progress + rate);
@@ -902,17 +977,20 @@ function updateBuilding(b, dt, scan) {
     if (b.def.atk) {
         b.cooldown -= dt;
         if (b.cooldown <= 0) {
-            const range = b.def.range + (hasTech(b.owner, 'dhanurveda') ? 1 : 0);
-            let best = null;
-            let bd = Infinity;
-            for (const e of G.ents.values()) {
+            const range = b.def.range + (hasTech(b.owner, 'dhanurveda') ? 1 : 0) + (civKind(b.owner) === 'archers' ? 1 : 0);
+            const targets = [];
+            for (const e of nearbyEnts(b.x, b.y, range + b.def.size)) {
                 if (e.kind !== 'unit' || !isEnemy(b, e)) continue;
                 const d = Math.hypot(e.x - b.x, e.y - b.y) - b.def.size / 2;
-                if (d < range && d < bd) { bd = d; best = e; }
+                if (d < range) targets.push([d, e]);
             }
-            if (best) {
+            if (targets.length) {
+                targets.sort((a, c) => a[0] - c[0]);
                 b.cooldown = b.def.rate;
-                G.projectiles.push({ x: b.x, y: b.y, z: 2, src: b, srcOwner: b.owner, target: best, kind: 'arrow', speed: 11, dmg: damageOf(b, best, true), splash: 0 });
+                for (let k = 0; k < (b.def.arrows || 1); k++) {
+                    const best = targets[k % targets.length][1];
+                    G.projectiles.push({ x: b.x, y: b.y, z: 2, src: b, srcOwner: b.owner, target: best, kind: 'arrow', speed: 11, dmg: damageOf(b, best, true), splash: 0 });
+                }
             }
         }
     }

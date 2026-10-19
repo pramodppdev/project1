@@ -6,7 +6,7 @@ const RES_KEYS = ['food', 'wood', 'stone', 'gold'];
 const RES_ICON = { food: '🌾', wood: '🪵', stone: '🪨', gold: '🪙' };
 const RES_NAME = { food: 'Food', wood: 'Wood', stone: 'Stone', gold: 'Gold' };
 const START_RES = { food: 200, wood: 200, stone: 150, gold: 100 };
-const POP_MAX = 150;
+const POP_MAX = 200;
 
 const AGES = [
     { name: 'Vedic Age', local: 'Vaidik Yug', cost: null, time: 0 },
@@ -15,13 +15,41 @@ const AGES = [
     { name: 'Golden Age', local: 'Swarna Yug', cost: { food: 1000, gold: 800 }, time: 70, needs: 2 },
 ];
 
-const CIVS = {
-    maurya: { name: 'Maurya', color: '#2f6fd6', bonus: 'Gold and stone gathered 15% faster.', leader: 'Chandragupta' },
-    chola: { name: 'Chola', color: '#d9442b', bonus: 'Food gathered 15% faster.', leader: 'Rajendra' },
-    rajput: { name: 'Rajput', color: '#e8a21a', bonus: 'Cavalry and elephants have 15% more health.', leader: 'Prithviraj' },
-    maratha: { name: 'Maratha', color: '#2e9d5a', bonus: 'Infantry and cavalry cost 15% less.', leader: 'Shivaji' },
-    vijayanagara: { name: 'Vijayanagara', color: '#8e44ad', bonus: 'Buildings have 25% more health and build 20% faster.', leader: 'Krishnadevaraya' },
+// Bonus kinds: farming, mining, mounted, thrift, builders, archers, forest, trade.
+const BONUS_TEXT = {
+    farming: 'Food gathered 15% faster.',
+    mining: 'Gold and stone gathered 15% faster.',
+    mounted: 'Cavalry and elephants have 15% more health.',
+    thrift: 'Infantry, archers and cavalry cost 15% less.',
+    builders: 'Buildings have 25% more health and build 20% faster.',
+    archers: 'Archers and towers shoot 1 tile further.',
+    forest: 'Wood gathered 15% faster.',
+    trade: 'Villages pay 30% more tribute and markets give better prices.',
 };
+const CIVS = {
+    maurya: { name: 'Maurya', color: '#2f6fd6', leader: 'Chandragupta', kind: 'mining' },
+    chola: { name: 'Chola', color: '#d9442b', leader: 'Rajendra', kind: 'farming' },
+    rajput: { name: 'Rajput', color: '#e8a21a', leader: 'Prithviraj', kind: 'mounted' },
+    maratha: { name: 'Maratha', color: '#2e9d5a', leader: 'Shivaji', kind: 'thrift' },
+    vijayanagara: { name: 'Vijayanagara', color: '#8e44ad', leader: 'Krishnadevaraya', kind: 'builders' },
+    gupta: { name: 'Gupta', color: '#f2d33a', leader: 'Samudragupta', kind: 'trade' },
+    pandya: { name: 'Pandya', color: '#1aa6b7', leader: 'Nedunjeliyan', kind: 'trade' },
+    chera: { name: 'Chera', color: '#7cb342', leader: 'Senguttuvan', kind: 'forest' },
+    pallava: { name: 'Pallava', color: '#c2185b', leader: 'Narasimhavarman', kind: 'builders' },
+    chalukya: { name: 'Chalukya', color: '#ff7043', leader: 'Pulakeshin', kind: 'archers' },
+    rashtrakuta: { name: 'Rashtrakuta', color: '#5c6bc0', leader: 'Amoghavarsha', kind: 'mining' },
+    kakatiya: { name: 'Kakatiya', color: '#a1887f', leader: 'Rudrama Devi', kind: 'builders' },
+    hoysala: { name: 'Hoysala', color: '#26a69a', leader: 'Vishnuvardhana', kind: 'farming' },
+    pala: { name: 'Pala', color: '#ec407a', leader: 'Dharmapala', kind: 'trade' },
+    satavahana: { name: 'Satavahana', color: '#8d6e63', leader: 'Gautamiputra', kind: 'thrift' },
+    kalinga: { name: 'Kalinga', color: '#00897b', leader: 'Kharavela', kind: 'mounted' },
+    magadha: { name: 'Magadha', color: '#6d4c41', leader: 'Bimbisara', kind: 'forest' },
+    avanti: { name: 'Avanti', color: '#9ccc65', leader: 'Pradyota', kind: 'archers' },
+    kuru: { name: 'Kuru', color: '#455a64', leader: 'Parikshit', kind: 'farming' },
+    ahom: { name: 'Ahom', color: '#ffb74d', leader: 'Sukaphaa', kind: 'forest' },
+};
+for (const c of Object.values(CIVS)) c.bonus = BONUS_TEXT[c.kind];
+const MAX_KINGDOMS = 20;
 
 // Armour has two kinds: melee (m) and pierce (p). Bonus multiplies damage against a class.
 const UNIT_TYPES = {
@@ -56,10 +84,16 @@ const BUILDING_TYPES = {
     market: { name: 'Market', local: 'Haat', icon: '', size: 3, hp: 1200, cost: { wood: 175 }, time: 30, age: 1, sight: 5, counts: true },
     gurukul: { name: 'Gurukul', local: 'Gurukul', icon: '', size: 3, hp: 1100, cost: { wood: 150, stone: 50 }, time: 30, age: 1, sight: 5, counts: true },
     panchayat: { name: 'Village Council', local: 'Panchayat Chaupal', icon: '', size: 2, hp: 1000, cost: { wood: 100, stone: 100, gold: 50 }, time: 30, age: 1, sight: 5, counts: true, mood: 5 },
+    thana: { name: 'Police Post', local: 'Thana', size: 2, hp: 1100, cost: { wood: 120, stone: 40 }, time: 25, age: 0, sight: 7, counts: true },
+    karyalaya: { name: 'Government Office', local: 'Karyalaya', size: 3, hp: 1500, cost: { wood: 200, stone: 150 }, time: 40, age: 1, sight: 5, counts: true },
+    wall: { name: 'Stone Wall', local: 'Prakar', size: 1, hp: 1400, cost: { stone: 6 }, time: 5, age: 1, sight: 2, line: true },
+    gate: { name: 'Gate', local: 'Dwar', size: 1, hp: 1800, cost: { stone: 30 }, time: 10, age: 1, sight: 3, gate: true, line: true },
+    fort: { name: 'Fort', local: 'Durg', size: 4, hp: 5200, cost: { stone: 650, wood: 250 }, time: 90, age: 2, sight: 10, atk: 8, range: 8, rate: 1.4, arrows: 3, trains: ['spearman', 'swordsman', 'archer', 'cavalry'], counts: true, territory: 11 },
+    village: { name: 'Village', local: 'Gaon', size: 3, hp: 3000, cost: {}, time: 1, age: 9, sight: 7, drop: RES_KEYS, pop: 8, trains: ['villager'], settlement: true },
     workshop: { name: 'Siege Workshop', local: 'Yantrashala', icon: '⚙️', size: 3, hp: 1300, cost: { wood: 200, gold: 50 }, time: 40, age: 2, trains: ['ram', 'rocket'], sight: 5, counts: true },
 };
 
-const BUILD_MENU = ['house', 'farm', 'storehouse', 'well', 'shmashan', 'barracks', 'range', 'stable', 'temple', 'market', 'gurukul', 'panchayat', 'university', 'tower', 'gajashala', 'workshop', 'tc'];
+const BUILD_MENU = ['house', 'farm', 'storehouse', 'well', 'shmashan', 'thana', 'barracks', 'range', 'stable', 'temple', 'market', 'gurukul', 'panchayat', 'karyalaya', 'university', 'tower', 'wall', 'gate', 'gajashala', 'workshop', 'fort', 'tc'];
 
 const TECHS = {
     plough: { name: 'Heavy plough', at: 'storehouse', age: 1, cost: { food: 125, wood: 125 }, time: 25, effect: 'Farms hold 50% more food and are worked 15% faster.' },
@@ -115,3 +149,31 @@ const FESTIVALS = [
     { at: 0.58, name: 'Onam', local: 'Return of Mahabali', mood: 15, text: 'Flower carpets and feasts in every home.', kind: 'flowers' },
     { at: 0.82, name: 'Diwali', local: 'Festival of lights', mood: 25, text: 'Lamps glow in every house and gold is offered to Lakshmi.', kind: 'lights' },
 ];
+
+// ---------- Realm: settlements, territory, offices and elections ----------
+
+const SETTLEMENT_LEVELS = [
+    null,
+    { name: 'Village', local: 'Gaon', pop: 8, radius: 8, tribute: 1, arrows: 0, hp: 3000 },
+    { name: 'Town', local: 'Nagar', pop: 12, radius: 10, tribute: 2, arrows: 2, hp: 4500, cost: { wood: 300, stone: 200 }, age: 1 },
+    { name: 'City', local: 'Mahanagar', pop: 20, radius: 13, tribute: 3.5, arrows: 4, hp: 7000, cost: { stone: 500, gold: 400 }, age: 2 },
+];
+const TERRITORY = { tc: 12, fort: 11, tower: 4 };
+const REALM_TITLES = [[1, 'Chiefdom', 'Raja'], [3, 'Kingdom', 'Maharaja'], [7, 'Empire', 'Samrat']];
+
+const PLACE_START = ['Rama', 'Krishna', 'Sona', 'Chandra', 'Hari', 'Shiva', 'Ganga', 'Lakshmi', 'Deva', 'Indra', 'Kamal', 'Madhu', 'Nila', 'Surya', 'Vijaya', 'Amra', 'Bel', 'Kesar', 'Tulsi', 'Mohan', 'Bhim', 'Gopal', 'Kanchi', 'Hampi', 'Ujjain', 'Mithila', 'Shri', 'Neel', 'Gauri', 'Durga'];
+const PLACE_END = ['pur', 'nagar', 'gaon', 'garh', 'pura', 'palli', 'puram', 'kot', 'wadi', 'ganj', 'pet', 'halli', 'patnam', 'ur', 'dih'];
+
+// One elected officer leads each stream of work.
+const OFFICES = {
+    food: { title: 'Krishi Adhikari', role: 'Agriculture officer' },
+    wood: { title: 'Van Adhikari', role: 'Forest officer' },
+    stone: { title: 'Shilpi Pramukh', role: 'Master of masons' },
+    gold: { title: 'Khani Adhikari', role: 'Mines officer' },
+    build: { title: 'Sthapati', role: 'Chief architect' },
+    fight: { title: 'Senapati', role: 'Army commander' },
+    police: { title: 'Kotwal', role: 'Chief of police' },
+};
+const ELECTION_YEARS = 5;
+const SCHOOL_AGE = 5;
+const COLLEGE_END = 18;

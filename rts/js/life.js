@@ -57,7 +57,9 @@ function isChild(u) {
 }
 
 function canWork(u) {
-    return !u.person || ageOf(u) >= WORK_AGE;
+    if (!u.person) return true;
+    const st = stageOf(u);
+    return st === 'adult' || st === 'child';
 }
 
 // Every soldier and villager is a person; siege engines are not.
@@ -155,6 +157,7 @@ function personWorkMult(u, key) {
         else if (a >= ELDER_AGE + 10) m *= 0.8;
         const pl = player(u.owner);
         if (pl.mukhiya === u.id) m *= 1.1;
+        if (u.person.lead) m *= 1 + Math.min(20, u.person.lead) * 0.003;
     }
     if (u.owner >= 0) m *= moodMult(u.owner);
     return m;
@@ -306,7 +309,7 @@ function ageing(pl) {
 
 function updateMood(pl, dt) {
     const parts = [['Daily life', 50]];
-    const has = t => [...G.ents.values()].filter(e => e.owner === pl.id && e.type === t && e.built && !e.dead).length;
+    const has = t => (G.typeCount && G.typeCount[pl.id] && G.typeCount[pl.id][t]) || 0;
     const temples = has('temple');
     if (temples) parts.push(['Temple', 8]);
     const wells = Math.min(3, has('well'));
@@ -382,6 +385,13 @@ function lifeTick(dt) {
         if (hasTech(pl.id, 'arthashastra')) pl.res.gold += 0.6 * dt;
     }
     if (G.moodClock >= 0.5) {
+        // Count every kingdom's finished buildings once for all the checks below.
+        G.typeCount = G.players.map(() => ({}));
+        for (const e of G.ents.values()) {
+            if (e.kind !== 'building' || e.owner < 0 || e.dead || !e.built) continue;
+            const c = G.typeCount[e.owner];
+            c[e.type] = (c[e.type] || 0) + 1;
+        }
         for (const pl of G.players) {
             if (pl.defeated) continue;
             updateMood(pl, G.moodClock);
@@ -398,7 +408,6 @@ function lifeTick(dt) {
         ageing(pl);
         tryMarriages(pl);
         tryBirths(pl);
-        updateCouncil(pl);
         // Pupils of the gurukul learn every trade a little.
         if (gurukul.has(pl.id)) {
             for (const e of G.ents.values()) {

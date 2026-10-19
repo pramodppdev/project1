@@ -11,7 +11,10 @@ let sunLight = null;
 let worldGroup = null;
 let fogTex = null;
 let fogData = null;
-const fogUniforms = { fogTex: { value: null }, fogSize: { value: new THREE.Vector2(1, 1) }, fogOn: { value: 1 } };
+const fogUniforms = { fogTex: { value: null }, fogSize: { value: new THREE.Vector2(1, 1) }, fogOn: { value: 1 }, terTex: { value: null } };
+let terTex = null;
+let terData = null;
+let terDrawnAt = -1;
 const camTarget = { x: 0, z: 0 };
 let camDist = 22;
 const CAM_PITCH = 0.96;
@@ -22,8 +25,9 @@ function vegRadius() {
 }
 
 // Every lit material multiplies its colour by the fog-of-war texture in world space.
-function patchFog(material) {
+function patchFog(material, ground) {
     material.onBeforeCompile = sh => {
+        sh.uniforms.terTex = fogUniforms.terTex;
         sh.uniforms.fogTex = fogUniforms.fogTex;
         sh.uniforms.fogSize = fogUniforms.fogSize;
         sh.uniforms.fogOn = fogUniforms.fogOn;
@@ -36,12 +40,14 @@ function patchFog(material) {
             #endif
             vFogXZ = (modelMatrix * fogW).xz;`);
         sh.fragmentShader = sh.fragmentShader
-            .replace('#include <common>', '#include <common>\nvarying vec2 vFogXZ;\nuniform sampler2D fogTex;\nuniform vec2 fogSize;\nuniform float fogOn;')
+            .replace('#include <common>', '#include <common>\nvarying vec2 vFogXZ;\nuniform sampler2D fogTex;\nuniform sampler2D terTex;\nuniform vec2 fogSize;\nuniform float fogOn;')
             .replace('#include <dithering_fragment>', `#include <dithering_fragment>
+            ${ground ? `vec4 ter = texture2D(terTex, (vFogXZ + 0.5) / fogSize);
+            gl_FragColor.rgb = mix(gl_FragColor.rgb, ter.rgb, ter.a * fogOn);` : ''}
             float fogV = texture2D(fogTex, (vFogXZ + 0.5) / fogSize).r;
             gl_FragColor.rgb *= mix(1.0, fogV, fogOn);`);
     };
-    material.customProgramCacheKey = () => 'fog';
+    material.customProgramCacheKey = () => (ground ? 'fog-ground' : 'fog');
     return material;
 }
 
@@ -164,10 +170,17 @@ function buildWorldScene() {
     fogTex.minFilter = THREE.LinearFilter;
     fogUniforms.fogTex.value = fogTex;
     fogUniforms.fogSize.value.set(MAP_W, MAP_H);
+    terData = new Uint8Array(MAP_W * MAP_H * 4);
+    terTex = new THREE.DataTexture(terData, MAP_W, MAP_H, THREE.RGBAFormat);
+    terTex.magFilter = THREE.LinearFilter;
+    terTex.minFilter = THREE.LinearFilter;
+    fogUniforms.terTex.value = terTex;
+    terDrawnAt = -1;
     computeHeights();
     buildTerrain(worldGroup);
+    const terrainMeshes = new Set(worldGroup.children);
     buildWater(worldGroup);
-    worldGroup.children.forEach(m => { if (m.material && m.material.isMeshStandardMaterial) patchFog(m.material); });
+    worldGroup.children.forEach(m => { if (m.material && m.material.isMeshStandardMaterial) patchFog(m.material, terrainMeshes.has(m)); });
     initVegetation();
     vegGroup.children.forEach(m => patchFog(m.material));
     initBatches();
@@ -175,6 +188,30 @@ function buildWorldScene() {
     ghost.visible = false;
     worldGroup.add(ghost);
     updateFogTexture();
+}
+
+// Borders: a bright line where one kingdom's land meets another's, and a faint wash inside.
+function updateTerritoryTexture() {
+    if (!terData || !territory || terDrawnAt === G.territoryAt) return;
+    terDrawnAt = G.territoryAt;
+    const cols = G.players.map(p => new THREE.Color(p.color).convertLinearToSRGB());
+    for (let y = 0; y < MAP_H; y++) for (let x = 0; x < MAP_W; x++) {
+        const i = idx(x, y);
+        const t = territory[i];
+        if (!t) { terData[i * 4 + 3] = 0; continue; }
+        let edge = false;
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+            const nx = x + dx;
+            const ny = y + dy;
+            if (inMap(nx, ny) && territory[idx(nx, ny)] !== t) { edge = true; break; }
+        }
+        const c = cols[t - 1];
+        terData[i * 4] = c.r * 255;
+        terData[i * 4 + 1] = c.g * 255;
+        terData[i * 4 + 2] = c.b * 255;
+        terData[i * 4 + 3] = edge ? 190 : 22;
+    }
+    terTex.needsUpdate = true;
 }
 
 function updateFogTexture() {
@@ -252,7 +289,7 @@ const SKIN = ['#8d5a3b', '#a86b45', '#7a4a2e', '#b57a50'];
 const RES_COLOR = { food: '#c2183a', wood: '#7a5230', stone: '#9a968e', gold: '#e0b43c' };
 
 function teamColor(owner) {
-    return owner >= 0 ? G.players[owner].color : '#7a5a3a';
+    return owner >= 0 ? G.players[owner].color : owner === -2 ? '#e8e0cc' : '#7a5a3a';
 }
 
 const SAREE = ['#c2185b', '#e65100', '#2e7d32', '#f9a825', '#6a1b9a', '#00838f', '#ad1457', '#d84315'];
@@ -328,8 +365,15 @@ function unitModel(u, t) {
     const team = teamColor(u.owner);
     switch (type) {
         case 'villager': {
-            const p = person(u, t, { body: u.person && u.person.female ? undefined : '#e9dcc0', belt: team, turban: team });
-            if (!p.child || canWork(u)) {
+            const guard = u.guard || u.alarm;
+            const p = person(u, t, u.guard ? { body: '#b8a070', blouse: '#b8a070', belt: '#7a2a1a', turban: '#a02a1a', sash: '#a02a1a' } : { body: u.person && u.person.female ? undefined : '#e9dcc0', belt: team, turban: team });
+            if (u.studying) {
+                prim('box', 0, p.by + 0.24, 0.16, 0.18, 0.02, 0.13, '#8a3a2a', -0.7);
+                prim('box', 0, p.by + 0.245, 0.16, 0.16, 0.022, 0.11, '#f2ead8', -0.7);
+            } else if (guard && !(u.task && u.task.type === 'gather')) {
+                prim('cyl', 0.2, p.by + 0.25, 0.1, 0.03, 1.0, 0.03, u.guard ? '#5a3a1a' : '#7a5a3a', 0.25 - p.swing * 0.4);
+                if (u.alarm && !u.guard) prim('cone', 0.2, p.by + 0.75, 0.22, 0.05, 0.12, 0.05, '#cfd4da', 0.25 - p.swing * 0.4);
+            } else if (!p.child || canWork(u)) {
                 const tool = u.task && u.task.res === 'wood' ? '#8a8a8a' : '#6a4a2a';
                 if (u.task || u.working) prim('box', 0.2, p.by + 0.1, 0.12, 0.03, 0.03, 0.42, tool, -0.6 - p.swing);
                 else if (p.female) prim('cyl', 0, p.by + 0.62, 0, 0.16, 0.1, 0.16, '#b8732a');
@@ -404,6 +448,7 @@ function unitModel(u, t) {
         }
         default: break;
     }
+    if (u.carry && u.carry.amt > 1 && type !== 'villager') prim('box', 0, 0.62, -0.17, 0.2, 0.18, 0.12, RES_COLOR[u.carry.res]);
 }
 
 function carcassModel(c) {
@@ -515,6 +560,106 @@ function buildingModel(b, t) {
             prim('sphere', 0.5, 1.45, 0.5, 1.5, 0.8, 1.5, '#3e6a2a');
             prim('box', 0.5, 0.12, 0.5, 1.2, 0.08, 1.2, '#b8a48a');
             prim('box', -0.2, 0.2, 0.3, 0.5, 0.06, 0.3, team);
+            break;
+        }
+        case 'village': {
+            // A cluster that grows with the settlement: huts, then tiled houses and a temple, then a walled city.
+            const own = b.owner >= 0 ? team : '#f2ead8';
+            const lv = b.level;
+            if (lv === 1) {
+                for (const [ox, oz, r] of [[-0.8, -0.7, 0.42], [0.85, -0.6, 0.38], [-0.75, 0.8, 0.4], [0.7, 0.85, 0.36]]) {
+                    prim('cyl', ox, 0.3, oz, r * 1.7, 0.6, r * 1.7, '#c99a6a');
+                    prim('cone', ox, 0.82, oz, r * 2.3, 0.5, r * 2.3, '#a68a52');
+                }
+                prim('cyl', 0, 0.2, 0, 0.5, 0.4, 0.5, '#a89c8a');
+            } else {
+                const n = lv === 2 ? 5 : 7;
+                for (let k = 0; k < n; k++) {
+                    const a = (k / n) * Math.PI * 2;
+                    const ox = Math.cos(a) * 1.0;
+                    const oz = Math.sin(a) * 1.0;
+                    prim('box', ox, 0.35, oz, 0.6, 0.7, 0.55, k % 2 ? '#ece3d2' : '#d9a56a', 0, -a, 0);
+                    prim('cone4', ox, 0.9, oz, 0.75, 0.4, 0.7, '#a2502c', 0, -a, 0);
+                }
+                prim('box', 0, 0.55, 0, 0.6, 1.1, 0.6, '#d6a46a');
+                for (let k = 0; k < 3; k++) prim('box', 0, 1.2 + k * 0.2, 0, 0.5 - k * 0.12, 0.22, 0.5 - k * 0.12, '#d6a46a');
+                if (lv === 3) {
+                    for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+                        prim('cyl', sx * 1.45, 0.6, sz * 1.45, 0.45, 1.2, 0.45, '#c8b498');
+                        prim('dome', sx * 1.45, 1.2, sz * 1.45, 0.24, 0.2, 0.24, own);
+                    }
+                    for (const [ox, oz, sx, sz] of [[0, -1.45, 2.6, 0.18], [0, 1.45, 2.6, 0.18], [-1.45, 0, 0.18, 2.6], [1.45, 0, 0.18, 2.6]]) prim('box', ox, 0.35, oz, sx, 0.7, sz, '#c8b498');
+                    prim('dome', 0, 1.85, 0, 0.35, 0.35, 0.35, '#f0e2c8');
+                }
+            }
+            prim('cyl', 0.2, 1.4, 0.2, 0.03, 2.2, 0.03, '#5a4a3a');
+            prim('box', 0.42, 2.3, 0.2, 0.42, 0.28, 0.02, own, 0, Math.sin(t * 2 + b.id) * 0.2, 0);
+            break;
+        }
+        case 'fort': {
+            const stone = '#b8a68c';
+            for (const [ox, oz, sx, sz] of [[0, -1.75, 3.2, 0.45], [-1.75, 0, 0.45, 3.2], [1.75, 0, 0.45, 3.2], [-1.05, 1.75, 1.3, 0.45], [1.05, 1.75, 1.3, 0.45]]) {
+                prim('box', ox, 0.75, oz, sx, 1.5, sz, stone);
+                const along = sx > sz;
+                const len = along ? sx : sz;
+                for (let k = 0; k < Math.floor(len / 0.4); k++) {
+                    const d = -len / 2 + 0.2 + k * 0.4;
+                    if (k % 2) prim('box', ox + (along ? d : 0), 1.6, oz + (along ? 0 : d), 0.22, 0.22, 0.22, stone);
+                }
+            }
+            for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+                prim('cyl', sx * 1.75, 1.0, sz * 1.75, 0.95, 2.0, 0.95, '#a8967c');
+                prim('dome', sx * 1.75, 2.0, sz * 1.75, 0.38, 0.3, 0.38, team);
+            }
+            prim('box', 0, 0.6, 1.8, 0.75, 1.2, 0.5, '#5a3a20');
+            prim('box', 0, 1.35, 1.8, 1.0, 0.3, 0.55, stone);
+            prim('box', 0, 1.1, -0.2, 1.6, 2.2, 1.4, '#c9b48e');
+            prim('dome', 0, 2.2, -0.2, 0.55, 0.5, 0.55, '#f0e2c8');
+            prim('cyl', 0.6, 3.0, -0.6, 0.04, 1.6, 0.04, '#5a4a3a');
+            prim('box', 0.9, 3.55, -0.6, 0.55, 0.36, 0.02, team, 0, Math.sin(t * 2) * 0.2, 0);
+            break;
+        }
+        case 'wall': case 'gate': {
+            // Wall pieces join up with their neighbours.
+            const stone = '#b8a68c';
+            const link = (dx, dz) => { const o = G.ents.get(occ[idx(b.tx + dx, b.ty + dz)] || 0); return o && !o.dead && o.def.line && o.owner === b.owner; };
+            const lx = link(-1, 0);
+            const rx = link(1, 0);
+            const uz = link(0, -1);
+            const dz = link(0, 1);
+            if (b.type === 'gate') {
+                const across = lx || rx || !(uz || dz);
+                for (const sgn of [-1, 1]) prim('box', across ? sgn * 0.38 : 0, 0.8, across ? 0 : sgn * 0.38, across ? 0.28 : 0.7, 1.6, across ? 0.7 : 0.28, stone);
+                prim('box', 0, 1.5, 0, across ? 1.0 : 0.7, 0.3, across ? 0.7 : 1.0, '#a8967c');
+                prim('box', 0, 1.72, 0, 0.3, 0.14, 0.3, team);
+                break;
+            }
+            prim('box', 0, 0.65, 0, 0.55, 1.3, 0.55, stone);
+            if (lx) prim('box', -0.27, 0.6, 0, 0.55, 1.2, 0.45, stone);
+            if (rx) prim('box', 0.27, 0.6, 0, 0.55, 1.2, 0.45, stone);
+            if (uz) prim('box', 0, 0.6, -0.27, 0.45, 1.2, 0.55, stone);
+            if (dz) prim('box', 0, 0.6, 0.27, 0.45, 1.2, 0.55, stone);
+            prim('box', 0, 1.36, 0, 0.3, 0.2, 0.3, '#a8967c');
+            break;
+        }
+        case 'thana': {
+            prim('box', 0, 0.45, 0, 1.6, 0.9, 1.3, '#d8c49a');
+            prim('box', 0, 0.95, 0, 1.75, 0.1, 1.45, '#8a3a2a');
+            prim('box', 0, 0.35, 0.66, 0.35, 0.6, 0.03, '#3a2414');
+            prim('box', 0, 0.75, 0.68, 1.4, 0.12, 0.03, '#2a3a8a');
+            for (let k = 0; k < 4; k++) prim('cyl', 0.55 + k * 0.08, 0.35, 0.8, 0.03, 0.7, 0.03, '#6a4a2a', 0.15);
+            prim('cyl', -0.6, 1.4, -0.4, 0.03, 1.0, 0.03, '#5a4a3a');
+            prim('box', -0.42, 1.75, -0.4, 0.35, 0.22, 0.02, team);
+            break;
+        }
+        case 'karyalaya': {
+            // A colonnaded hall where the officers of the realm work.
+            prim('box', 0, 0.12, 0, 2.7, 0.24, 2.2, '#c8b498');
+            prim('box', 0, 0.75, -0.3, 2.3, 1.1, 1.3, '#ece3d2');
+            for (let k = 0; k < 6; k++) prim('cyl', -1.0 + k * 0.4, 0.75, 0.6, 0.14, 1.1, 0.14, '#f2ead8');
+            prim('box', 0, 1.36, 0.1, 2.5, 0.14, 2.0, '#b86a48');
+            prim('dome', 0, 1.43, -0.3, 0.5, 0.45, 0.5, '#f0e2c8');
+            prim('box', 0, 1.1, 0.72, 2.2, 0.1, 0.03, team);
             break;
         }
         case 'panchayat': {
@@ -671,6 +816,7 @@ function renderFrame(now) {
     if (!renderer || !G) return;
     const t = now / 1000;
     placeCamera();
+    updateTerritoryTexture();
     if (vegDirty && now - lastVeg > 500) { vegDirty = false; lastVeg = now; streamVegetation(true); } else streamVegetation(false);
     waterBump.offset.y = (now / 9000) % 1;
     beginBatches();
@@ -714,6 +860,19 @@ function renderFrame(now) {
         frame(b.x, surfaceAt(b.x, b.y) + 0.4, b.y, 0);
         prim('glow', 0, 0, 0, 0.6 + k * 2, 0.6 + k * 1.6, 0.6 + k * 2, k < 0.5 ? '#ffd060' : '#a0603a');
     }
+    // A wall being dragged out shows each piece it will place.
+    const pl = UI.placing;
+    if (pl && pl.lineStart && pl.tile) {
+        pl.lineTiles = lineTiles(pl.lineStart, pl.tile);
+        pl.lineOk = 0;
+        for (const [x, y] of pl.lineTiles) {
+            const ok = footprintFree(pl.type, x, y) && mayBuild(G.human, pl.type, x, y) && inMap(x, y) && fogExplored[idx(x, y)];
+            if (ok) pl.lineOk++;
+            frame(x, surfaceAt(x, y) + 0.3, y, 0);
+            prim('glow', 0, 0, 0, 0.9, 0.5, 0.9, ok ? '#4caf50' : '#e53935');
+        }
+        pl.ok = pl.lineOk > 0;
+    }
     endBatches();
     updateGhost();
     renderer.render(scene, camera);
@@ -731,7 +890,8 @@ function updateGhost() {
     const pl = UI.placing;
     if (!pl || !pl.tile) { ghost.visible = false; return; }
     const n = BUILDING_TYPES[pl.type].size;
-    const ok = footprintFree(pl.type, pl.tile[0], pl.tile[1]) && fogExploredAll(pl.tile[0], pl.tile[1], n);
+    if (pl.lineStart) { ghost.visible = false; return; }
+    const ok = footprintFree(pl.type, pl.tile[0], pl.tile[1]) && fogExploredAll(pl.tile[0], pl.tile[1], n) && mayBuild(G.human, pl.type, pl.tile[0], pl.tile[1]);
     ghost.visible = true;
     ghost.scale.set(n, 1, n);
     const cx = pl.tile[0] + (n - 1) / 2;
@@ -802,6 +962,30 @@ function drawOverlay() {
         octx.fill();
         octx.fillStyle = label.color;
         octx.fillText(label.text, s.x, y + 2);
+    }
+    // Settlement names, like labels on a map, with the progress of any siege.
+    octx.font = '600 12px Hind, system-ui, sans-serif';
+    for (const v of G.ents.values()) {
+        if (v.type !== 'village' || v.dead || !seenByHuman(v)) continue;
+        const s = toScreen(v.x, surfaceAt(v.x, v.y) + 2.8, v.y);
+        if (s.behind || s.x < -60 || s.x > viewW + 60 || s.y < -20 || s.y > viewH + 20) continue;
+        const text = `${v.name} · ${SETTLEMENT_LEVELS[v.level].name}`;
+        const w = octx.measureText(text).width + 22;
+        octx.fillStyle = 'rgba(20,12,24,.82)';
+        roundRect(octx, s.x - w / 2, s.y - 11, w, 19, 9);
+        octx.fill();
+        octx.fillStyle = v.owner >= 0 ? player(v.owner).color : '#e8e0cc';
+        octx.beginPath();
+        octx.arc(s.x - w / 2 + 10, s.y - 1.5, 4, 0, Math.PI * 2);
+        octx.fill();
+        octx.fillStyle = '#f6ead2';
+        octx.fillText(text, s.x + 5, s.y + 2);
+        if (v.capture) {
+            octx.fillStyle = 'rgba(0,0,0,.6)';
+            octx.fillRect(s.x - 30, s.y + 10, 60, 5);
+            octx.fillStyle = player(v.capture.owner).color;
+            octx.fillRect(s.x - 30, s.y + 10, 60 * Math.min(1, v.capture.p / 100), 5);
+        }
     }
     if (UI.drag && UI.drag.box) {
         const d = UI.drag;

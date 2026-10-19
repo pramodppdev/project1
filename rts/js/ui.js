@@ -59,10 +59,24 @@ function smartCommand(pick) {
         return;
     }
     const e = pick.ent;
-    const vills = units.filter(u => u.def.cls === 'villager');
-    const others = units.filter(u => u.def.cls !== 'villager');
+    const vills = units.filter(canGather);
+    const others = units.filter(u => !canGather(u));
     if (e) {
+        if (e.type === 'village' && e.owner !== G.human) {
+            // Soldiers standing in a settlement win it over.
+            const army = units.filter(u => u.def.cls !== 'villager');
+            if (e.owner >= 0 && relation(G.human, e.owner) === 'ally') { cmdMove(units, e.x, e.y + 2.5); return; }
+            if (e.owner >= 0 && relation(G.human, e.owner) === 'neutral' && !confirmWar(e.owner)) return;
+            if (e.owner >= 0 && relation(G.human, e.owner) === 'neutral') declareWar(G.human, e.owner);
+            cmdMove(units, e.x, e.y + 2.5);
+            marker(e.x, e.y, '#ffd34a');
+            say(army.length ? `March on ${e.name}! Keep soldiers inside it, with no defenders left, to win it over.` : 'Only soldiers can win over a settlement. Villagers will just walk there.', 'info');
+            return;
+        }
         if (e.owner >= 0 && e.owner !== G.human && e.kind !== 'carcass') {
+            const rel = relation(G.human, e.owner);
+            if (rel === 'ally') { cmdMove(units, e.x, e.y + 1.5); return; }
+            if (rel === 'neutral' && !confirmWar(e.owner)) return;
             cmdAttack(units, e);
             marker(e.x, e.y, '#ff6a5a');
             return;
@@ -104,8 +118,53 @@ function smartCommand(pick) {
     marker(g.x, g.z, '#7dff7a');
 }
 
+// Attacking a neutral kingdom means war, so ask once by needing a second click.
+function confirmWar(owner) {
+    if (UI.warAsk && UI.warAsk.owner === owner && performance.now() - UI.warAsk.at < 6000) { UI.warAsk = null; return true; }
+    UI.warAsk = { owner, at: performance.now() };
+    say(`${CIVS[player(owner).civ].name} is at peace with you. Give the order again to declare war.`, 'bad');
+    return false;
+}
+
+function lineTiles(a, b) {
+    const out = [];
+    let [x, y] = a;
+    const [x1, y1] = b;
+    out.push([x, y]);
+    let guard = 0;
+    while ((x !== x1 || y !== y1) && guard++ < 80) {
+        const dx = x1 - x;
+        const dy = y1 - y;
+        if (Math.abs(dx) * (Math.abs(b[1] - a[1]) + 1) >= Math.abs(dy) * (Math.abs(b[0] - a[0]) + 1)) x += Math.sign(dx);
+        else y += Math.sign(dy);
+        out.push([x, y]);
+    }
+    return out;
+}
+
+function confirmLine() {
+    const pl = UI.placing;
+    const tiles = pl.lineTiles || [];
+    const builders = selUnits().filter(canGather).filter(u => !isChild(u));
+    const placed = [];
+    for (const [x, y] of tiles) {
+        if (!inMap(x, y) || !fogExplored[idx(x, y)]) continue;
+        const b = tryPlace(G.human, pl.type, x, y, []);
+        if (b) placed.push(b);
+        else if (!canAfford(G.human, BUILDING_TYPES[pl.type].cost)) { say('Not enough stone to finish the wall.', 'bad'); break; }
+    }
+    if (placed.length) {
+        placed.sort((a, b) => Math.hypot(a.x - builders[0].x, a.y - builders[0].y) - Math.hypot(b.x - builders[0].x, b.y - builders[0].y));
+        cmdBuild(builders, placed[0]);
+        marker(placed[0].x, placed[0].y, '#7dff7a');
+    } else say('A wall cannot be built there.', 'bad');
+    UI.placing = null;
+    UI.panelKey = '';
+    $('cursor-tip').hidden = true;
+}
+
 function startPlacing(type) {
-    if (!selVillagers().length) return;
+    if (!selUnits().some(canGather)) return;
     UI.placing = { type, tile: null, ok: false };
     UI.panelKey = '';
 }
@@ -119,12 +178,12 @@ function placingTileAt(sx, sy) {
 function confirmPlacing(keep) {
     const pl = UI.placing;
     if (!pl || !pl.tile) return;
-    if (!pl.ok) { say('You cannot build there.', 'bad'); return; }
+    if (!pl.ok) { say(mayBuild(G.human, pl.type, pl.tile[0], pl.tile[1]) ? 'You cannot build there.' : 'That land belongs to another kingdom.', 'bad'); return; }
     const def = BUILDING_TYPES[pl.type];
     if (!canAfford(G.human, def.cost)) { say(`Not enough resources for a ${def.name.toLowerCase()}.`, 'bad'); UI.placing = null; return; }
-    const b = tryPlace(G.human, pl.type, pl.tile[0], pl.tile[1], selVillagers());
+    const b = tryPlace(G.human, pl.type, pl.tile[0], pl.tile[1], selUnits().filter(canGather));
     if (b) marker(b.x, b.y, '#7dff7a');
-    if (!keep || !canAfford(G.human, def.cost)) UI.placing = null;
+    if (!keep || !canAfford(G.human, def.cost)) { UI.placing = null; $('cursor-tip').hidden = true; }
     UI.panelKey = '';
 }
 
@@ -162,9 +221,18 @@ function commandList() {
             out.push({ img: PORTRAIT[type], label: d.name, cost: d.cost, desc: buildingDesc(type), lock: lockReason(G.human, 'build', type), act: () => startPlacing(type), on: UI.placing && UI.placing.type === type });
         }
     }
+    if (vills.length && vills.length === units.length) {
+        const allGuards = vills.every(v => v.guard);
+        const post = hasBuilt(G.human, 'thana');
+        out.push({ svg: icon('police', 28), label: allGuards ? 'Stand down' : 'Make guard', desc: allGuards ? 'These guards go back to ordinary life.' : 'Enrol as police guards (Rakshak). Guards keep working but take up their lathis and gather to defend whenever enemies come near your homes.', lock: allGuards || post ? null : 'Requires a Police Post (Thana)', act: () => { for (const v of vills) if (!isChild(v)) v.guard = !allGuards; } });
+    }
     if (units.length) {
         out.push({ svg: icon('stop', 26), label: 'Stop', desc: 'Stop what they are doing.', act: () => { for (const u of units) { u.task = null; u.path = []; } } });
         out.push({ svg: icon('dismiss', 26), label: 'Dismiss', desc: 'Send these people away from the kingdom for good.', act: () => { for (const u of units) leaveKingdom(u); select([]); } });
+    }
+    if (b && b.built && b.type === 'village') {
+        const next = SETTLEMENT_LEVELS[b.level + 1];
+        if (next) out.push({ img: PORTRAIT.village, label: `Grow to ${next.name}`, cost: next.cost, desc: `Turn ${b.name} into a ${next.name.toLowerCase()} (${next.local}): ${next.pop} homes, more tribute, wider borders${next.arrows ? `, and archers on its walls` : ''}.`, lock: player(G.human).age < next.age ? `Requires the ${AGES[next.age].name}` : null, act: () => { const r = developSettlement(G.human, b); if (r) say(r, 'bad'); } });
     }
     if (b && b.built) {
         for (const t of b.def.trains || []) {
@@ -235,6 +303,12 @@ function renderTop() {
         + `<button class="res mood" id="mood-btn" title="Happiness of your people">${moodIcon(p.mood, 20)}${Math.round(p.mood)}</button>`;
     $('mood-btn').onclick = () => openPeople('mood');
     $('age-name').textContent = AGES[p.age].name;
+    const rt = realmTitle(G.human);
+    $('realm-title').textContent = `${CIVS[p.civ].name} ${rt.realm} · ${rt.n} ${rt.n === 1 ? 'settlement' : 'settlements'}`;
+    $('btn-alarm').innerHTML = `${icon('bell', 18)}<span>${p.alarm ? 'All clear' : 'Alarm'}</span>`;
+    $('btn-alarm').classList.toggle('ringing', !!p.alarm || !!p.threat);
+    const offers = G.offers.filter(o => o.to === G.human).length;
+    $('btn-kingdoms').innerHTML = `${icon('ally', 18)}<span>Kingdoms</span>${offers ? ` <b>${offers}</b>` : ''}`;
     const s = Math.floor(G.time);
     const year = Math.floor(G.time / YEAR) + 1;
     $('clock').textContent = `Year ${year} · ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
@@ -274,7 +348,9 @@ function personLine(u) {
     const pl = player(u.owner);
     const stage = a < WORK_AGE ? (u.person.female ? 'Little girl' : 'Little boy') : a < ADULT_AGE ? (u.person.female ? 'Girl' : 'Boy') : a >= ELDER_AGE ? (u.person.female ? 'Elder woman' : 'Elder man') : u.person.female ? 'Woman' : 'Man';
     const bits = [`${stage}, ${a}`];
-    if (pl.mukhiya === u.id) bits.unshift(`${icon('crown', 14)} Mukhiya`);
+    const office = officeHeld(u);
+    if (office) bits.unshift(`${icon(office.key === 'mukhiya' ? 'crown' : 'office', 14)} ${office.title} (${office.role.toLowerCase()})`);
+    if (u.guard) bits.push(`${icon('police', 14)} Police guard`);
     if (u.def.cls !== 'villager') bits.unshift(`${icon('star', 14)} ${RANKS[rankOf(u)][1]}${u.person.kills ? ` · ${u.person.kills} defeated` : ''}`);
     return bits.join(' · ');
 }
@@ -318,7 +394,7 @@ function renderInfo() {
         return;
     }
     const e = sel[0];
-    const owner = e.owner >= 0 ? player(e.owner).name : e.kind === 'unit' && e.def.cls === 'animal' ? 'Wild animal' : '';
+    const owner = e.owner >= 0 ? `${player(e.owner).name}${e.owner !== G.human ? ` · ${{ ally: 'ally', neutral: 'neutral', enemy: 'enemy' }[relation(G.human, e.owner)]}` : ''}` : e.kind === 'unit' && e.def.cls === 'animal' ? 'Wild animal' : e.owner === -2 ? 'Independent' : '';
     const pic = portraitFor(e);
     const title = e.person ? e.person.name : e.def.name;
     const sub = e.person ? `${e.def.name}${e.def.local ? ` (${e.def.local})` : ''} · ${owner}` : `${e.def.local ? `${e.def.local} · ` : ''}${owner}`;
@@ -328,7 +404,9 @@ function renderInfo() {
         if (e.def.cls !== 'animal') html += `<span>${icon('sword', 14)} ${Math.round(unitAtk(e) * 10) / 10}</span><span>${icon('shield', 14)} ${armourOf(e, false)}/${armourOf(e, true)}</span>${e.def.range > 1.5 ? `<span>${icon('range', 14)} ${unitRange(e)}</span>` : ''}`;
         html += '</div></div></div>';
         if (e.person) html += `<div class="sub">${personLine(e)}</div><div class="sub">${familyLine(e)}</div>`;
-        html += `<div class="sub doing">${e.def.cls === 'animal' ? `${e.def.food} food when hunted` : ageOf(e) < WORK_AGE ? 'Too young to work — plays near home' : taskText(e)}${e.carry && e.carry.amt >= 1 ? ` · carrying ${Math.floor(e.carry.amt)} ${icon(e.carry.res, 14)}` : ''}</div>`;
+        const st = e.person && e.def.cls === 'villager' ? stageOf(e) : 'adult';
+        const doing = st === 'infant' ? 'Too young to work — plays near home' : st === 'school' ? 'Pupil at the Gurukul, learning every trade' : st === 'college' ? `Student at the University, studying ${SKILLS[studyStream(e)].toLowerCase()} until 18` : taskText(e);
+        html += `<div class="sub doing">${e.def.cls === 'animal' ? `${e.def.food} food when hunted` : doing}${e.carry && e.carry.amt >= 1 ? ` · carrying ${Math.floor(e.carry.amt)} ${icon(e.carry.res, 14)}` : ''}</div>`;
         if (e.person && e.owner === G.human) {
             const best = bestSkill(e);
             html += `<div class="sub best">${best && best[1] >= 1 ? `Best at ${SKILLS[best[0]].toLowerCase()}: ${skillLevel(best[1])} (${Math.floor(best[1])})` : 'Still learning every trade'}</div>`;
@@ -338,9 +416,16 @@ function renderInfo() {
         html += '</div></div></div>';
         if (!e.built) html += `<div class="sub">Under construction: ${Math.floor(e.progress * 100)}%</div>`;
         else if (e.type === 'farm') html += `<div class="sub">${Math.floor(e.food)} food left${wellNear(e) ? ' · watered by a well (+10%)' : ''}</div>`;
-        else if (e.def.pop) {
+        else if (e.def.pop && e.type !== 'village') {
             const fam = [...player(e.owner).families.values()].find(f => f.home === e.id);
             html += `<div class="sub">Shelters ${e.def.pop + (e.type === 'house' && hasTech(e.owner, 'pucca') ? 3 : 0)} people${fam ? ` · home of <button class="link" data-family="${fam.id}">${fam.name}</button>` : e.type === 'house' ? ' · empty, waiting for a newly-wed couple' : ''}</div>`;
+        }
+        if (e.type === 'village') {
+            const L = SETTLEMENT_LEVELS[e.level];
+            html = html.replace(`<h3>${e.def.name}</h3>`, `<h3>${e.name}</h3>`).replace(`${e.def.local ? `${e.def.local} · ` : ''}${owner}`, `${L.name} (${L.local}) · ${e.owner >= 0 ? player(e.owner).name : 'Independent'}`);
+            html += `<div class="sub">About ${e.people} people · ${e.owner >= 0 ? `pays ${Math.round(L.tribute * 0.75 * 60)} goods a minute in tribute · shelters ${L.pop}` : `free, defended by its own militia (${Math.round(e.militia)})`}${L.arrows ? ` · ${L.arrows} archers on the walls` : ''}</div>`;
+            if (e.capture) html += `<div class="sub">${e.capture.owner === G.human ? 'Your soldiers are winning it over' : `${CIVS[player(e.capture.owner).civ].name} is taking it`}: ${Math.floor(e.capture.p)}%</div><div class="bar"><i style="width:${e.capture.p}%;background:${player(e.capture.owner).color}"></i></div>`;
+            else if (e.owner !== G.human) html += `<div class="sub">${e.owner >= 0 && relation(G.human, e.owner) === 'ally' ? 'Held by your ally.' : 'Right-click it with soldiers selected to win it over.'}</div>`;
         }
         if (e.type === 'shmashan') html += `<div class="sub">${(e.pyreUntil || 0) > G.time ? 'A pyre is burning. The family grieves.' : 'The dead are given their last rites here.'}</div>`;
         if (e.type === 'panchayat') { const m = G.ents.get(player(e.owner).mukhiya); html += `<div class="sub">${m ? `Mukhiya: <button class="link" data-person="${m.id}">${m.person.name}</button> (all work +5%)` : 'Choosing a Mukhiya…'}</div>`; }
@@ -480,7 +565,10 @@ function buildMiniBase() {
     miniBase = { canvas: c, ctx: g, img };
 }
 
+let TER_RGB = [];
+
 function drawMinimap() {
+    if (TER_RGB.g !== G) { TER_RGB = G.players.map(p => { const c = new THREE.Color(p.color).convertLinearToSRGB(); return [c.r * 255, c.g * 255, c.b * 255]; }); TER_RGB.g = G; }
     const mm = $('minimap');
     const g = mm.getContext('2d');
     const W = mm.width;
@@ -496,6 +584,13 @@ function drawMinimap() {
         if (ro && v) {
             if (ro.res === 'wood') { r = 40; gg = 78; b = 30; } else if (ro.res === 'gold') { r = 240; gg = 200; b = 60; } else if (ro.res === 'stone') { r = 190; gg = 190; b = 180; } else { r = 200; gg = 40; b = 70; }
         }
+        const t = territory ? territory[i] : 0;
+        if (t && v) {
+            const c = TER_RGB[t - 1];
+            r = r * 0.55 + c[0] * 0.45;
+            gg = gg * 0.55 + c[1] * 0.45;
+            b = b * 0.55 + c[2] * 0.45;
+        }
         img.data[i * 4] = r * v;
         img.data[i * 4 + 1] = gg * v;
         img.data[i * 4 + 2] = b * v;
@@ -508,8 +603,15 @@ function drawMinimap() {
     const sy = H / MAP_H;
     for (const e of G.ents.values()) {
         if (e.dead || e.kind === 'carcass' || !seenByHuman(e)) continue;
-        g.fillStyle = e.owner >= 0 ? player(e.owner).color : '#e8d8a8';
-        if (e.kind === 'building') g.fillRect(e.tx * sx, e.ty * sy, Math.max(3, e.def.size * sx), Math.max(3, e.def.size * sy));
+        g.fillStyle = e.owner >= 0 ? player(e.owner).color : e.owner === -2 ? '#f6ead2' : '#e8d8a8';
+        if (e.type === 'village') {
+            g.strokeStyle = '#120d18';
+            g.lineWidth = 1;
+            g.beginPath();
+            g.arc((e.x + 0.5) * sx, (e.y + 0.5) * sy, 2 + e.level, 0, Math.PI * 2);
+            g.fill();
+            g.stroke();
+        } else if (e.kind === 'building') g.fillRect(e.tx * sx, e.ty * sy, Math.max(2, e.def.size * sx), Math.max(2, e.def.size * sy));
         else g.fillRect(e.x * sx - 1, e.y * sy - 1, 2.5, 2.5);
     }
     if (G.alertPos && G.time - G.alertAt < 4 && Math.floor(G.time * 3) % 2) {
@@ -596,6 +698,8 @@ function initInput() {
     $('btn-idle').innerHTML = `${icon('idle', 18)}<span>Idle</span> <b id="idle-n">0</b>`;
     $('btn-army').innerHTML = `${icon('army', 18)}<span>Army</span>`;
     $('btn-people').onclick = () => openPeople('families');
+    $('btn-kingdoms').onclick = () => openPeople('kingdoms');
+    $('btn-alarm').onclick = () => soundAlarm(G.human, !player(G.human).alarm);
     $('people-close').onclick = closePeople;
     document.querySelectorAll('#people .tabs [data-tab]').forEach(b => b.onclick = () => openPeople(b.dataset.tab));
     $('btn-idle').onclick = nextIdle;
@@ -620,7 +724,10 @@ function onDown(e) {
     if (e.pointerType === 'mouse' && e.button === 0 && !UI.placing) UI.drag = { x0: x, y0: y, x1: x, y1: y, box: false, mode: 'select' };
     else if (e.pointerType === 'mouse' && (e.button === 1 || e.button === 2)) UI.drag = { x0: x, y0: y, x1: x, y1: y, mode: 'pan', button: e.button, cam: { ...camTarget } };
     else if (e.pointerType !== 'mouse') UI.drag = { x0: x, y0: y, x1: x, y1: y, mode: 'pan', touch: true, cam: { ...camTarget } };
-    else UI.drag = { x0: x, y0: y, x1: x, y1: y, mode: 'place' };
+    else {
+        UI.drag = { x0: x, y0: y, x1: x, y1: y, mode: 'place' };
+        if (UI.placing && BUILDING_TYPES[UI.placing.type].line && e.button === 0) UI.placing.lineStart = placingTileAt(x, y);
+    }
 }
 
 function onMove(e) {
@@ -674,7 +781,8 @@ function onUp(e) {
         return;
     }
     if (d.mode === 'place') {
-        if (UI.placing && e.button === 0) { UI.placing.tile = placingTileAt(d.x1, d.y1); confirmPlacing(shift); }
+        if (UI.placing && e.button === 0 && UI.placing.lineStart) { UI.placing.tile = placingTileAt(d.x1, d.y1); UI.placing.lineTiles = lineTiles(UI.placing.lineStart, UI.placing.tile); confirmLine(); }
+        else if (UI.placing && e.button === 0) { UI.placing.tile = placingTileAt(d.x1, d.y1); confirmPlacing(shift); }
         else if (UI.placing) UI.placing = null;
         return;
     }
@@ -706,6 +814,12 @@ function clickSelect(x, y, shift) {
 function touchTap(x, y, long) {
     if (UI.placing) {
         const t = placingTileAt(x, y);
+        if (BUILDING_TYPES[UI.placing.type].line) {
+            // First tap marks where the wall starts, the second where it ends.
+            if (!UI.placing.lineStart) { UI.placing.lineStart = t; UI.placing.tile = t; say('Now tap where the wall should end.', 'info'); }
+            else { UI.placing.tile = t; UI.placing.lineTiles = lineTiles(UI.placing.lineStart, t); confirmLine(); }
+            return;
+        }
         if (UI.placing.tile && UI.placing.tile[0] === t[0] && UI.placing.tile[1] === t[1]) confirmPlacing(false);
         else UI.placing.tile = t;
         return;
@@ -743,6 +857,8 @@ function onKey(e) {
         return;
     }
     if (k === 'h') { selectTC(); return; }
+    if (k === 'k') { if ($('people').hidden || peopleTab !== 'kingdoms') openPeople('kingdoms'); else closePeople(); return; }
+    if (k === 'b') { soundAlarm(G.human, !player(G.human).alarm); return; }
     if (k === 'l') { if ($('people').hidden) openPeople('families'); else closePeople(); return; }
     if (k === '.') { nextIdle(); return; }
     if (k === ',') { selectArmy(); return; }
@@ -795,7 +911,7 @@ function updateHover(x, y, cx, cy) {
         UI.hover = null;
         tip.hidden = false;
         const d = BUILDING_TYPES[UI.placing.type];
-        tip.innerHTML = `<b>${d.name}</b> ${UI.placing.ok ? 'Click to place' : '<span class="no">Blocked here</span>'} · right-click to cancel`;
+        tip.innerHTML = d.line ? `<b>${d.name}</b> ${UI.placing.lineStart ? `${UI.placing.lineOk || 0} pieces · ${icon('stone', 14)} ${(UI.placing.lineOk || 0) * d.cost.stone}` : 'Press and drag to draw a line'} · right-click to cancel` : `<b>${d.name}</b> ${UI.placing.ok ? 'Click to place' : '<span class="no">Blocked here</span>'} · right-click to cancel`;
         placeTip(tip, cx, cy);
         cv.style.cursor = 'copy';
         return;
@@ -863,6 +979,56 @@ function renderPeople(famId) {
         body.innerHTML = `<div class="mood-big">${moodIcon(p.mood, 40)}<div><b>${Math.round(p.mood)}</b> — your people are ${moodWord(p.mood)}<div class="sub">Happiness changes how fast everyone works (${Math.round((moodMult(G.human) - 1) * 100) >= 0 ? '+' : ''}${Math.round((moodMult(G.human) - 1) * 100)}%) and how often families have children.</div></div></div>`
             + `<table class="mood-parts">${p.moodParts.map(([n, v]) => `<tr><td>${n}</td><td class="${v < 0 ? 'no' : 'yes'}">${v > 0 ? '+' : ''}${v}</td></tr>`).join('')}</table>`
             + `<h4>Festivals</h4><div class="fest-list">${FESTIVALS.map(f => `<div class="fest-${f.kind}"><b>${f.name}</b> <span class="sub">${f.local}</span><div class="sub">${f.text}</div></div>`).join('')}</div><div class="sub">Next: ${nextFestival()}. A temple doubles the joy of every festival.</div>`;
+        return;
+    }
+    if (peopleTab === 'government') {
+        const head = G.ents.get(p.mukhiya);
+        const council = hasBuilt(G.human, 'panchayat');
+        const office = hasBuilt(G.human, 'karyalaya');
+        const card = (u, title, role, extra) => `<div class="officer">${u ? `<img src="${portraitFor(u)}" alt="">` : '<div class="empty"></div>'}<div><b>${title}</b><div class="sub">${role}</div>${u ? `<button class="link" data-person="${u.id}">${u.person.name}</button> <span class="sub">${Math.floor(ageOf(u))}${extra ? ` · ${extra}` : ''}</span>` : '<span class="sub">Vacant</span>'}</div></div>`;
+        let html = `<div class="sub summary">${council ? `Next election in ${Math.max(0, Math.ceil(((p.nextElection || G.time) - G.time) / YEAR))} years (every ${ELECTION_YEARS} years). Every grown-up votes, first for their own family.` : 'Build a Village Council (Panchayat) so the people can elect a Mukhiya.'}</div>`;
+        html += `<div class="officers">${card(head, `${icon('crown', 16)} Mukhiya`, 'Village head: everyone works 5% faster', head ? `${Math.round(reputation(head))} respect` : '')}`;
+        for (const [k, o] of Object.entries(OFFICES)) {
+            const u = officerOf(G.human, k);
+            const sk = k === 'police' ? 'fight' : k;
+            html += card(u, `${icon(k === 'police' ? 'police' : k === 'fight' ? 'sword' : k === 'build' ? 'office' : k, 16)} ${o.title}`, `${o.role}${office ? '' : ' — needs a Government Office'}`, u ? `${skillLevel(u.person.skills[sk])} (${Math.floor(u.person.skills[sk])}) · +${Math.round(u.person.skills[sk] * 0.15)}%` : '');
+        }
+        html += '</div>';
+        const last = p.lastElection;
+        if (last) html += `<h4>${icon('vote', 16)} Election of year ${last.year}</h4><div class="races">${last.races.map(r => `<div class="race"><b>${r.office}</b> <span class="sub">${r.title}</span><ul>${r.results.map((x, k) => `<li class="${k ? '' : 'won'}"><button class="link" data-person="${x.id}">${x.name}</button><i style="--w:${Math.round(100 * x.votes / Math.max(1, r.results.reduce((a, y) => a + y.votes, 0)))}%"></i><span>${x.votes}</span></li>`).join('')}</ul></div>`).join('')}</div>`;
+        const guards = [...G.ents.values()].filter(e => e.owner === G.human && !e.dead && e.guard).length;
+        const students = [...G.ents.values()].filter(e => e.owner === G.human && !e.dead && e.person && (stageOf(e) === 'school' || stageOf(e) === 'college'));
+        html += `<h4>Schools and police</h4><div class="sub">${hasBuilt(G.human, 'gurukul') ? `${students.filter(e => stageOf(e) === 'school').length} pupils at the Gurukul` : 'No Gurukul: children work in the fields from age 6'} · ${hasBuilt(G.human, 'university') ? `${students.filter(e => stageOf(e) === 'college').length} students at the University` : 'No University yet'} · ${guards} police guards${hasBuilt(G.human, 'thana') ? '' : ' (build a Police Post to enrol them)'}</div>`;
+        body.innerHTML = html;
+        wireLinks(body);
+        body.querySelectorAll('[data-person]').forEach(btn => btn.addEventListener('click', closePeople));
+        return;
+    }
+    if (peopleTab === 'kingdoms') {
+        const offers = G.offers.filter(o => o.to === G.human);
+        const rows = G.players.filter(q => q.id !== G.human).sort((a, b) => (a.defeated - b.defeated) || (Math.hypot(a.start[0] - p.start[0], a.start[1] - p.start[1]) - Math.hypot(b.start[0] - p.start[0], b.start[1] - p.start[1])));
+        let html = offers.length ? `<div class="offers">${offers.map((o, k) => `<div class="offer">${icon(o.what === 'peace' ? 'peace' : 'ally', 20)} <b style="color:${player(o.from).color}">${CIVS[player(o.from).civ].name}</b> ${o.what === 'peace' ? 'asks for peace.' : 'offers you an alliance.'} <button class="primary" data-offer="${k}" data-yes="1">Accept</button><button data-offer="${k}" data-yes="0">Refuse</button></div>`).join('')}</div>` : '';
+        html += `<table class="kingdoms"><tr><th>Kingdom</th><th>Lands</th><th>Strength</th><th>Opinion of you</th><th>Relation</th><th></th></tr>${rows.map(q => {
+            const rel = relation(G.human, q.id);
+            const op = q.defeated ? '' : opinionOf(q.id, G.human);
+            const acts = q.defeated ? '<span class="sub">Defeated</span>'
+                : rel === 'enemy' ? `<button data-act="peace" data-k="${q.id}">${icon('peace', 16)} Ask peace</button>`
+                    : rel === 'ally' ? `<button data-act="gift" data-k="${q.id}">${icon('gift', 16)} Gift 100 gold</button><button data-act="break" data-k="${q.id}">Break alliance</button>`
+                        : `<button data-act="alliance" data-k="${q.id}">${icon('ally', 16)} Propose alliance</button><button data-act="gift" data-k="${q.id}">${icon('gift', 16)} Gift</button><button data-act="war" data-k="${q.id}">${icon('war', 16)} War</button>`;
+            return `<tr class="${q.defeated ? 'gone' : ''}"><td><span class="swatch" style="background:${q.color}"></span><b>${CIVS[q.civ].name}</b><div class="sub">${CIVS[q.civ].leader} · ${AGES[q.age].name}</div></td><td>${settlementsOf(q.id).length}</td><td>${Math.round(strength(q.id))}</td><td class="${op < 0 ? 'no' : op > 0 ? 'yes' : ''}">${op}</td><td><span class="rel rel-${rel}">${{ ally: 'Ally', neutral: 'Neutral', enemy: 'At war' }[rel]}</span></td><td class="acts">${acts}</td></tr>`;
+        }).join('')}</table>`;
+        html += '<p class="sub">Allies share what they see and join your wars of defence. Gifts and common enemies raise opinion; war and taking their villages lower it.</p>';
+        body.innerHTML = html;
+        body.querySelectorAll('[data-offer]').forEach(b => b.onclick = () => { answerOffer(offers[+b.dataset.offer], b.dataset.yes === '1'); renderPeople(); });
+        body.querySelectorAll('[data-act]').forEach(b => b.onclick = () => {
+            const q = +b.dataset.k;
+            const act = b.dataset.act;
+            if (act === 'war') declareWar(G.human, q);
+            else if (act === 'gift') { if (!sendTribute(G.human, q, 'gold', 100)) say('You need 100 gold to send a gift.', 'bad'); else say(`You send 100 gold to ${CIVS[player(q).civ].name}.`, 'good'); }
+            else if (act === 'break') { setRelation(G.human, q, 'neutral'); G.opinion[q][G.human] -= 40; say(`You end your alliance with ${CIVS[player(q).civ].name}.`, 'bad'); }
+            else { const r = propose(G.human, q, act); if (r) say(r, 'bad'); }
+            renderPeople();
+        });
         return;
     }
     if (peopleTab === 'chronicle') {

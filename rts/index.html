@@ -15,8 +15,10 @@
 
         <header id="topbar">
             <div id="resbar"></div>
-            <div id="agebox"><span id="age-name">Vedic Age</span><span id="clock">0:00</span></div>
+            <div id="agebox"><span id="age-name">Vedic Age</span><span id="realm-title"></span><span id="clock">0:00</span></div>
             <div class="top-actions">
+                <button id="btn-alarm" title="Ring the alarm bell: every grown-up takes up arms (B)"></button>
+                <button id="btn-kingdoms" title="Allies and enemies (K)"></button>
                 <button id="btn-people" title="Families, happiness and chronicle (L)"><svg class="ico" width="16" height="16" viewBox="0 0 24 24"></svg><span>People</span></button>
                 <button id="btn-idle" title="Next idle villager (.)"><svg class="ico" width="16" height="16" viewBox="0 0 24 24"></svg><span>Idle</span> <b id="idle-n">0</b></button>
                 <button id="btn-army" title="Select all soldiers (,)"><svg class="ico" width="16" height="16" viewBox="0 0 24 24"></svg><span>Army</span></button>
@@ -45,9 +47,9 @@
                 <p class="civ-bonus" id="civ-bonus"></p>
                 <div class="row">
                     <div>
-                        <h2>Rivals</h2>
-                        <div class="chips" id="opp-chips">
-                            <button data-opp="1" class="on">1</button><button data-opp="2">2</button><button data-opp="3">3</button>
+                        <h2>Kingdoms</h2>
+                        <div class="chips" id="kingdom-chips">
+                            <button data-k="2">2</button><button data-k="4">4</button><button data-k="8" class="on">8</button><button data-k="12">12</button><button data-k="20">20</button>
                         </div>
                     </div>
                     <div>
@@ -59,10 +61,11 @@
                     <div>
                         <h2>Land</h2>
                         <div class="chips" id="size-chips">
-                            <button data-size="small">Small</button><button data-size="medium" class="on">Medium</button><button data-size="large">Large</button>
+                            <button data-size="medium">Medium</button><button data-size="large" class="on">Large</button><button data-size="huge">Huge</button><button data-size="giant">Giant</button>
                         </div>
                     </div>
                 </div>
+                <p class="civ-bonus" id="land-note"></p>
                 <h2>Map seed</h2>
                 <div class="seed-row"><input id="seed-input" inputmode="numeric" autocomplete="off" aria-label="Map seed"><button id="seed-random">New seed</button></div>
                 <div class="actions"><button id="how-btn">How to play</button><button id="start-btn" class="primary">Begin</button></div>
@@ -78,10 +81,16 @@
                     <li><b>Camera</b>: WASD or arrow keys, drag with the right or middle mouse button, push the mouse to the screen edge, or click the map. Wheel or pinch to zoom.</li>
                     <li><b>Build</b>: select villagers and pick a building, then click where it should stand. Houses raise your population limit.</li>
                     <li><b>Advance</b>: build two buildings of your age, then research the next age at the Town Center.</li>
-                    <li><b>Win</b>: destroy every rival Town Center and villager.</li>
+                    <li><b>Expand</b>: march soldiers into an independent village and hold it, with no defenders left, to win it over. Villages pay tribute and can grow into towns and cities. Rivals will try to snatch them back.</li>
+                    <li><b>Borders</b>: your land is shown by a coloured border. You can build in your own land or in the wilds, never inside another kingdom. Forts, towns and towers push your borders out; walls and gates (drag to draw) keep raiders out.</li>
+                    <li><b>Kingdoms</b>: each rival is an ally, neutral or an enemy. Make alliances, send gifts, declare war or ask for peace in the Kingdoms screen. Allies share what they see and defend each other.</li>
+                    <li><b>Government</b>: build a Village Council and the people elect a Mukhiya every 5 years. A Government Office adds an elected officer for every stream of work, who speeds it up and teaches it.</li>
+                    <li><b>Growing up</b>: with a Gurukul children go to school instead of working, and with a University young people study a trade until 18 before they start work.</li>
+                    <li><b>Defence</b>: soldiers and police guards also gather and build. When enemies come near your homes they drop their work and gather to protect the town, then go back. Ring the alarm bell to arm everyone.</li>
+                    <li><b>Win</b>: defeat every kingdom that is not your ally, or rule two thirds of all the towns and villages.</li>
                     <li><b>People</b>: every villager has a name, an age and a family. Skills grow with the work they do. Married couples with a house have children, who grow up and learn. Elders pass away; a cremation ground lets families give the last rites.</li>
                     <li><b>Happiness</b>: temples, wells, a village council, festivals, weddings and full granaries make people happy and work harder. Hunger, crowding and the unhonoured dead make them sad.</li>
-                    <li><b>Keys</b>: H town center, . idle villager, , army, L people, Delete removes selection, Esc cancels, P pauses.</li>
+                    <li><b>Keys</b>: H town center, . idle villager, , army, L people, K kingdoms, B alarm bell, Delete removes selection, Esc cancels, P pauses.</li>
                 </ul>
                 <div class="actions"><button id="how-close" class="primary">Back</button></div>
             </div>
@@ -90,7 +99,7 @@
         <div id="people" class="sheet" hidden>
             <div class="sheet-card wide">
                 <div class="tabs" role="tablist">
-                    <button data-tab="families" class="on">Families</button><button data-tab="mood">Happiness</button><button data-tab="chronicle">Chronicle</button>
+                    <button data-tab="families" class="on">Families</button><button data-tab="government">Government</button><button data-tab="kingdoms">Kingdoms</button><button data-tab="mood">Happiness</button><button data-tab="chronicle">Chronicle</button>
                     <button id="people-close" class="close" aria-label="Close">✕</button>
                 </div>
                 <div id="people-body"></div>
@@ -119,6 +128,7 @@
     <script src="js/data.js"></script>
     <script src="js/icons.js"></script>
     <script src="js/life.js"></script>
+    <script src="js/realm.js"></script>
     <script src="js/map.js"></script>
     <script src="js/sim.js"></script>
     <script src="js/ai.js"></script>

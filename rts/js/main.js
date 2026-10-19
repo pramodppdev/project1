@@ -2,7 +2,9 @@
 
 // ---------- Boot, start screen and main loop ----------
 
-const setup = { civ: 'maurya', opponents: 1, difficulty: 'normal', size: 'medium' };
+const setup = { civ: 'maurya', kingdoms: 8, difficulty: 'normal', size: 'large' };
+const SIZE_FOR = { 2: 'medium', 4: 'large', 8: 'large', 12: 'huge', 20: 'giant' };
+const MAX_FOR_SIZE = { medium: 4, large: 8, huge: 14, giant: 20 };
 
 function randomSeed() {
     return String(Math.floor(Math.random() * 900000) + 100000);
@@ -18,13 +20,25 @@ function initStart() {
         chips.querySelectorAll('button').forEach(o => o.classList.toggle('on', o === b));
         showBonus();
     });
-    for (const [id, key, attr] of [['opp-chips', 'opponents', 'opp'], ['diff-chips', 'difficulty', 'diff'], ['size-chips', 'size', 'size']]) {
-        const box = $(id);
-        box.querySelectorAll('button').forEach(b => b.onclick = () => {
-            setup[key] = key === 'opponents' ? +b.dataset[attr] : b.dataset[attr];
-            box.querySelectorAll('button').forEach(o => o.classList.toggle('on', o === b));
-        });
-    }
+    const sync = () => {
+        document.querySelectorAll('#kingdom-chips button').forEach(o => o.classList.toggle('on', +o.dataset.k === setup.kingdoms));
+        document.querySelectorAll('#size-chips button').forEach(o => o.classList.toggle('on', o.dataset.size === setup.size));
+        document.querySelectorAll('#diff-chips button').forEach(o => o.classList.toggle('on', o.dataset.diff === setup.difficulty));
+        const side = WORLD_SIZES[setup.size];
+        $('land-note').textContent = `${side} × ${side} land with ${setup.kingdoms} kingdoms and about ${Math.max(setup.kingdoms + 2, Math.round(side * side / 1500))} independent villages.${setup.kingdoms >= 12 ? ' A long game: computer kingdoms may be slower on older phones.' : ''}`;
+    };
+    document.querySelectorAll('#kingdom-chips button').forEach(b => b.onclick = () => {
+        setup.kingdoms = +b.dataset.k;
+        setup.size = SIZE_FOR[setup.kingdoms];
+        sync();
+    });
+    document.querySelectorAll('#size-chips button').forEach(b => b.onclick = () => {
+        setup.size = b.dataset.size;
+        if (setup.kingdoms > MAX_FOR_SIZE[setup.size]) setup.kingdoms = [2, 4, 8, 12, 20].filter(k => k <= MAX_FOR_SIZE[setup.size]).pop();
+        sync();
+    });
+    document.querySelectorAll('#diff-chips button').forEach(b => b.onclick = () => { setup.difficulty = b.dataset.diff; sync(); });
+    sync();
     $('seed-input').value = randomSeed();
     $('seed-random').onclick = () => { $('seed-input').value = randomSeed(); };
     $('start-btn').onclick = beginGame;
@@ -45,7 +59,7 @@ function showStart() {
 function beginGame() {
     const raw = $('seed-input').value.trim();
     const seed = /^\d+$/.test(raw) ? Number(raw) : [...raw].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) || 1;
-    newGame({ seed, size: setup.size, opponents: setup.opponents, civ: setup.civ, difficulty: setup.difficulty });
+    newGame({ seed, size: setup.size, kingdoms: setup.kingdoms, opponents: setup.kingdoms - 1, civ: setup.civ, difficulty: setup.difficulty });
     UI.selected = [];
     UI.placing = null;
     UI.msgSeen = -1;
@@ -67,10 +81,10 @@ function showEnd() {
     $('end-title').textContent = win ? 'Victory!' : 'Defeat';
     const s = Math.floor(G.time);
     $('end-text').textContent = win
-        ? `In ${Math.floor(s / 60)} minutes the ${CIVS[player(G.human).civ].name} have united the land under one banner.`
+        ? (G.victoryKind === 'empire' ? `In ${Math.floor(s / 60)} minutes the ${CIVS[player(G.human).civ].name} have built an empire that rules two thirds of all towns and villages.` : `In ${Math.floor(s / 60)} minutes the ${CIVS[player(G.human).civ].name} and their allies have united the land.`)
         : `After ${Math.floor(s / 60)} minutes your kingdom has fallen. Rise again with a new seed.`;
-    $('end-stats').innerHTML = '<tr><th>Kingdom</th><th>Age</th><th>Gathered</th><th>Built</th><th>Killed</th><th>Lost</th></tr>'
-        + G.players.map(p => `<tr><td style="color:${p.color}">${p.name}${p.defeated ? ' ✝' : ''}</td><td>${AGES[p.age].name.replace(' Age', '')}</td><td>${Math.floor(p.stats.gathered)}</td><td>${p.stats.built}</td><td>${p.stats.killed}</td><td>${p.stats.lost}</td></tr>`).join('');
+    $('end-stats').innerHTML = '<tr><th>Kingdom</th><th>Lands</th><th>Age</th><th>Gathered</th><th>Killed</th><th>Lost</th></tr>'
+        + G.players.slice().sort((a, b) => settlementsOf(b.id).length - settlementsOf(a.id).length).map(p => `<tr><td style="color:${p.color}">${p.name}${p.defeated ? ' ✝' : ''}${p.id !== G.human && relation(G.human, p.id) === 'ally' ? ' (ally)' : ''}</td><td>${settlementsOf(p.id).length}</td><td>${AGES[p.age].name.replace(' Age', '')}</td><td>${Math.floor(p.stats.gathered)}</td><td>${p.stats.killed}</td><td>${p.stats.lost}</td></tr>`).join('');
     $('end').hidden = false;
 }
 

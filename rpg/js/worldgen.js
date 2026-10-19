@@ -14,7 +14,7 @@ let biome = [];
 let fieldOwner = [];
 let WORLD = null;
 
-const WORLD_SIZES = { small: 64, medium: 96, large: 128 };
+const WORLD_SIZES = { small: 64, medium: 96, large: 128, huge: 192, giant: 256 };
 
 const BIOMES = {
     grassland: { name: 'Grasslands', spawn: ['boar', 'boar', 'jackal', 'dacoit'], map: '#86a84e' },
@@ -385,6 +385,7 @@ function findPath(ax, ay, bx, by) {
     const N = MAP_W * MAP_H;
     const dist = new Float32Array(N).fill(Infinity);
     const prev = new Int32Array(N).fill(-1);
+    const done = new Uint8Array(N);
     const open = [[0, idx(ax, ay)]];
     dist[idx(ax, ay)] = 0;
     const goal = idx(bx, by);
@@ -420,6 +421,8 @@ function findPath(ax, ay, bx, by) {
     };
     while (open.length) {
         const [, cur] = popMin();
+        if (done[cur]) continue;
+        done[cur] = 1;
         if (cur === goal) break;
         const cx = cur % MAP_W;
         const cy = Math.floor(cur / MAP_W);
@@ -431,7 +434,7 @@ function findPath(ax, ay, bx, by) {
             const c = j === goal ? 1 : stepCost(j);
             if (c === Infinity) continue;
             const nd = dist[cur] + c;
-            if (nd < dist[j]) {
+            if (nd < dist[j] && !done[j]) {
                 dist[j] = nd;
                 prev[j] = cur;
                 push([nd + Math.abs(nx - bx) + Math.abs(ny - by), j]);
