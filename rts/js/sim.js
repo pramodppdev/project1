@@ -26,11 +26,20 @@ function newGame(opts) {
         G.players.push({
             id: p, civ, name: p === 0 ? `${CIVS[civ].name} (you)` : `${CIVS[civ].name} of ${CIVS[civ].leader}`, color: CIVS[civ].color,
             res: { ...START_RES }, age: 0, techs: [], defeated: false, start: starts[p],
-            ai: p === 0 ? null : newAI(p, opts.difficulty), stats: { gathered: 0, killed: 0, lost: 0, built: 0 },
+            ai: p === 0 ? null : newAI(p, opts.difficulty), stats: { gathered: 0, killed: 0, lost: 0, built: 0, born: 0 },
         });
+        initLife(G.players[p]);
         const [sx, sy] = starts[p];
-        placeBuilding(p, 'tc', sx - 1, sy - 1, true);
-        for (let k = 0; k < 3; k++) spawnUnit(p, 'villager', sx - 1 + k, sy + 2.3);
+        const tc = placeBuilding(p, 'tc', sx - 1, sy - 1, true);
+        // The founding family: a married couple and the husband's younger brother.
+        const man = spawnUnit(p, 'villager', sx - 1, sy + 2.3, { female: false, age: 27, skills: { wood: 20, build: 10 } });
+        const fam = familyOf(man);
+        const wife = spawnUnit(p, 'villager', sx, sy + 2.3, { female: true, age: 24, family: fam.id, skills: { food: 22 } });
+        spawnUnit(p, 'villager', sx + 1, sy + 2.3, { female: false, age: 18, family: fam.id, skills: { gold: 12 } });
+        man.person.spouse = wife.id;
+        wife.person.spouse = man.id;
+        fam.home = tc.id;
+        fam.name = `${man.person.name} and ${wife.person.name}'s household`;
         const herd = ringPoint(rng, sx, sy, 7, 10, [[sx, sy, 5]]);
         for (let k = 0; k < 4; k++) spawnUnit(-1, 'deer', herd[0] + (k % 2) * 0.8, herd[1] + Math.floor(k / 2) * 0.8);
         const boar = ringPoint(rng, sx, sy, 11, 14, [[sx, sy, 8]]);
@@ -85,6 +94,7 @@ function unitCost(owner, type) {
 function unitAtk(u) {
     let a = u.def.atk;
     if (u.owner < 0) return a;
+    if (u.person) a *= (1 + rankOf(u) * 0.1) * (u.def.cls === 'villager' ? 1 + u.person.skills.fight / 60 : 1) * (isChild(u) ? 0.4 : 1);
     if (hasTech(u.owner, 'wootz') && ['infantry', 'cavalry', 'elephant'].includes(u.def.cls)) a += 2;
     if (hasTech(u.owner, 'dhanurveda') && u.def.missile === 'arrow') a += 1;
     return a;
@@ -141,7 +151,7 @@ function popOf(owner) {
         if (e.owner !== owner || e.dead) continue;
         if (e.kind === 'unit') used++;
         else if (e.kind === 'building') {
-            if (e.built && e.def.pop) cap += e.def.pop;
+            if (e.built && e.def.pop) cap += e.def.pop + (e.type === 'house' && hasTech(owner, 'pucca') ? 3 : 0);
             if (e.queue.length && e.queue[0].unit) used++;
         }
     }
@@ -160,20 +170,29 @@ function ageReady(owner) {
 
 // ---------- Entities ----------
 
-function spawnUnit(owner, type, x, y) {
+function spawnUnit(owner, type, x, y, opts) {
     const def = UNIT_TYPES[type];
     const hp = Math.round(def.hp * unitHpMult(owner, type));
-    return makeEnt({ kind: 'unit', type, def, owner, x, y, hp, maxHp: hp, path: [], task: null, cooldown: 0, carry: null, facing: Math.random() * 6, moving: false, radius: def.radius || 0.28, born: G.time });
+    const u = makeEnt({ kind: 'unit', type, def, owner, x, y, hp, maxHp: hp, path: [], task: null, cooldown: 0, carry: null, facing: Math.random() * 6, moving: false, radius: def.radius || 0.28, born: G.time });
+    if (owner >= 0) attachPerson(u, opts);
+    if (owner >= 0 && opts && opts.age === 0) player(owner).stats.born++;
+    return u;
 }
 
 function placeBuilding(owner, type, tx, ty, done) {
     const def = BUILDING_TYPES[type];
     const n = def.size;
-    const hp = Math.round(def.hp * (owner >= 0 && player(owner).civ === 'vijayanagara' ? 1.25 : 1));
+    const hp = Math.round(def.hp * (owner >= 0 && player(owner).civ === 'vijayanagara' ? 1.25 : 1) * (owner >= 0 ? upgradeHpMult(owner, type) : 1));
     const e = makeEnt({ kind: 'building', type, def, owner, tx, ty, x: tx + (n - 1) / 2, y: ty + (n - 1) / 2, hp: done ? hp : 1, maxHp: hp, built: !!done, progress: done ? 1 : 0, queue: [], rally: null, cooldown: 0, food: def.food || 0, radius: n / 2 });
     for (let y = ty; y < ty + n; y++) for (let x = tx; x < tx + n; x++) occ[idx(x, y)] = e.id;
     if (done) onBuilt(e);
     return e;
+}
+
+function upgradeHpMult(owner, type) {
+    if (type === 'house' && hasTech(owner, 'pucca')) return 2;
+    if ((type === 'tc' || type === 'tower') && hasTech(owner, 'fortified')) return 1.5;
+    return 1;
 }
 
 function onBuilt(b) {
@@ -193,11 +212,19 @@ function onBuilt(b) {
     }
 }
 
-function kill(e, src) {
+function kill(e, src, cause) {
     if (e.dead) return;
     e.dead = true;
     e.deadAt = G.time;
     e.path = [];
+    if (e.person) onPersonDeath(e, cause || 'battle');
+    if (src && src.person && !src.dead && e.kind === 'unit' && e.owner >= 0 && e.owner !== src.owner) {
+        const before = rankOf(src);
+        src.person.kills++;
+        gainSkill(src, 'fight', 4);
+        const after = rankOf(src);
+        if (after > before && src.owner === G.human) chronicle(src.owner, `${src.person.name} is promoted to ${RANKS[after][1]} for bravery in battle.`, 'good');
+    }
     if (e.owner >= 0) player(e.owner).stats.lost++;
     if (src && src.owner >= 0 && e.owner !== src.owner && e.owner >= 0) player(src.owner).stats.killed++;
     if (e.kind === 'unit' && e.def.cls === 'animal') {
@@ -335,6 +362,7 @@ function cmdMove(units, x, y) {
 
 function cmdAttack(units, target) {
     for (const u of units) {
+        if (!canWork(u)) continue;
         if (u.def.cls === 'villager' && target.def.cls === 'animal') { u.task = { type: 'gather', ent: target.id, res: 'food', hunt: true }; continue; }
         if (u.def.onlyBuildings && target.kind !== 'building') continue;
         u.task = { type: 'attack', ent: target.id };
@@ -345,15 +373,15 @@ function cmdAttack(units, target) {
 function cmdGatherTile(units, i) {
     const ro = RESOURCE_OBJECTS[objects[i]];
     if (!ro) return;
-    for (const u of units) if (u.def.cls === 'villager') { u.task = { type: 'gather', tile: i, res: ro.res }; u.path = []; }
+    for (const u of units) if (u.def.cls === 'villager' && canWork(u)) { u.task = { type: 'gather', tile: i, res: ro.res }; u.path = []; }
 }
 
 function cmdGatherEnt(units, e) {
-    for (const u of units) if (u.def.cls === 'villager') { u.task = { type: 'gather', ent: e.id, res: 'food', hunt: e.kind === 'unit' }; u.path = []; }
+    for (const u of units) if (u.def.cls === 'villager' && canWork(u)) { u.task = { type: 'gather', ent: e.id, res: 'food', hunt: e.kind === 'unit' }; u.path = []; }
 }
 
 function cmdBuild(units, b) {
-    for (const u of units) if (u.def.cls === 'villager') { u.task = { type: 'build', ent: b.id }; u.path = []; }
+    for (const u of units) if (u.def.cls === 'villager' && !isChild(u)) { u.task = { type: 'build', ent: b.id }; u.path = []; }
 }
 
 function cmdDrop(units, b) {
@@ -427,6 +455,7 @@ function step(dt) {
     }
     separate();
     updateProjectiles(dt);
+    lifeTick(dt);
     G.fogClock += dt;
     if (G.fogClock > 0.25) { G.fogClock = 0; updateFog(); }
     G.aiClock += dt;
@@ -464,7 +493,9 @@ function moveAlong(u, dt) {
     const dy = ty - u.y;
     const d = Math.hypot(dx, dy);
     const onRoad = ground[idx(Math.round(u.x), Math.round(u.y))] === 'p';
-    const sp = u.def.speed * (onRoad ? 1.15 : 1) * dt;
+    let sp = u.def.speed * (onRoad ? 1.15 : 1) * dt;
+    if (u.owner >= 0 && hasTech(u.owner, 'roads')) sp *= 1.1;
+    if (u.person) { const a = ageOf(u); if (a < ADULT_AGE) sp *= 0.8; else if (a > ELDER_AGE + 8) sp *= 0.85; }
     u.facing = Math.atan2(dx, dy);
     u.moving = true;
     if (d <= sp) {
@@ -485,6 +516,7 @@ function updateUnit(u, dt, scan) {
     u.cooldown -= dt;
     u.working = null;
     if (u.def.cls === 'animal') return updateAnimal(u, dt);
+    if (u.person && ageOf(u) < WORK_AGE) return toddle(u, dt);
     const t = u.task;
     if (!t) {
         if (scan && u.def.cls !== 'villager') autoTarget(u);
@@ -541,7 +573,7 @@ function doAttack(u, t) {
 }
 
 function damageOf(src, e, pierce) {
-    const atk = src.kind === 'building' ? src.def.atk + (hasTech(src.owner, 'dhanurveda') ? 1 : 0) : unitAtk(src);
+    const atk = src.kind === 'building' ? src.def.atk + (hasTech(src.owner, 'dhanurveda') ? 1 : 0) + (hasTech(src.owner, 'fortified') ? 2 : 0) : unitAtk(src);
     const cls = e.kind === 'building' ? 'building' : e.def.cls;
     const bonus = (src.def.bonus && src.def.bonus[cls]) || 1;
     return Math.max(1, atk * bonus - armourOf(e, pierce));
@@ -620,6 +652,19 @@ function updateAnimal(u, dt) {
     moveAlong(u, u.pathKey === 'wander' ? dt * 0.5 : dt);
 }
 
+// Little children play near their home.
+function toddle(u, dt) {
+    if (!u.path.length && Math.random() < dt * 0.15) {
+        const fam = familyOf(u);
+        const home = fam && fam.home && G.ents.get(fam.home);
+        const cx = home && !home.dead ? home.x : u.x;
+        const cy = home && !home.dead ? home.y + home.def.size / 2 + 1 : u.y;
+        const [gx, gy] = nearestPassable(cx + (Math.random() - 0.5) * 4, cy + (Math.random() - 0.5) * 3);
+        pathToward(u, [[gx, gy]], gx, gy, `toddle${gx},${gy}`);
+    }
+    moveAlong(u, dt * 0.6);
+}
+
 // ---------- Villager work ----------
 
 function doGather(u, t) {
@@ -631,6 +676,7 @@ function doGather(u, t) {
         if (distToEnt(u, drop) <= 0.8) {
             const p = player(u.owner);
             p.res[u.carry.res] += u.carry.amt;
+            if (u.owner === G.human && u.carry.amt >= 1) floatText(u.x, u.y, `+${Math.round(u.carry.amt)} ${u.carry.res}`, { food: '#ffb4a0', wood: '#e0c090', stone: '#d8d8d0', gold: '#ffd34a' }[u.carry.res]);
             p.stats.gathered += u.carry.amt;
             u.carry = null;
             t.returning = false;
@@ -712,11 +758,22 @@ function gatherTick(u, dt) {
     const res = w.res;
     if (u.carry && u.carry.res !== res) u.carry = null;
     if (!u.carry) u.carry = { res, amt: 0 };
-    const rate = (w.farm ? GATHER_RATE.farm : w.ent ? GATHER_RATE.hunt : GATHER_RATE[res]) * gatherMult(u.owner, res, w.farm);
+    let rate = (w.farm ? GATHER_RATE.farm : w.ent ? GATHER_RATE.hunt : GATHER_RATE[res]) * gatherMult(u.owner, res, w.farm) * personWorkMult(u, res);
+    if (w.farm && wellNear(w.ent)) rate *= 1.1;
+    gainSkill(u, res, dt * 0.09);
     let got = 0;
     if (w.tile !== undefined) got = takeRes(w.tile, rate * dt);
     else if (w.ent) { got = Math.min(rate * dt, w.ent.food); w.ent.food -= got; }
     u.carry.amt = Math.min(CARRY, u.carry.amt + got);
+}
+
+function wellNear(farm) {
+    if (!farm || farm.kind !== 'building') return false;
+    if (G.time - (farm.wellAt || -99) > 10) {
+        farm.wellAt = G.time;
+        farm.well = [...G.ents.values()].some(e => e.type === 'well' && e.owner === farm.owner && e.built && !e.dead && Math.hypot(e.x - farm.x, e.y - farm.y) < BUILDING_TYPES.well.farmBoost);
+    }
+    return farm.well;
 }
 
 function reseed(farm) {
@@ -761,7 +818,8 @@ function doBuild(u, t, dt) {
         u.path = [];
         faceTo(u, b.x, b.y);
         u.building = G.time;
-        const rate = (dt / b.def.time) * buildMult(u.owner) * (player(u.owner).ai ? player(u.owner).ai.eco : 1);
+        const rate = (dt / b.def.time) * buildMult(u.owner) * (player(u.owner).ai ? player(u.owner).ai.eco : 1) * personWorkMult(u, 'build');
+        gainSkill(u, 'build', dt * 0.12);
         if (!b.built) {
             b.progress = Math.min(1, b.progress + rate);
             b.hp = Math.min(b.maxHp, b.hp + b.maxHp * rate);
@@ -830,6 +888,14 @@ function updateBuilding(b, dt, scan) {
     } else if (q.tech) {
         p.techs.push(q.tech);
         if (q.tech === 'ayurveda') for (const e of G.ents.values()) if (e.kind === 'unit' && e.owner === b.owner && !e.dead) { e.maxHp = Math.round(e.maxHp * 1.2); e.hp = Math.round(e.hp * 1.2); }
+        if (q.tech === 'pucca' || q.tech === 'fortified') {
+            for (const e of G.ents.values()) {
+                if (e.owner !== b.owner || e.kind !== 'building' || e.dead) continue;
+                const m = q.tech === 'pucca' ? (e.type === 'house' ? 2 : 1) : (e.type === 'tc' || e.type === 'tower' ? 1.5 : 1);
+                e.maxHp = Math.round(e.maxHp * m);
+                e.hp = Math.round(e.hp * m);
+            }
+        }
         if (q.tech === 'plough') for (const e of G.ents.values()) if (e.type === 'farm' && e.owner === b.owner) e.food *= 1.5;
         if (b.owner === G.human) say(`Researched ${TECHS[q.tech].name}.`, 'good');
     } else if (q.age) {

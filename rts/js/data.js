@@ -51,10 +51,15 @@ const BUILDING_TYPES = {
     university: { name: 'University', local: 'Vidyalaya', icon: '📜', size: 3, hp: 1500, cost: { wood: 200 }, time: 35, age: 1, sight: 5, counts: true },
     tower: { name: 'Watch Tower', local: 'Burj', icon: '🗼', size: 1, hp: 1000, cost: { wood: 25, stone: 125 }, time: 25, age: 1, atk: 6, range: 7, rate: 2, sight: 9 },
     gajashala: { name: 'Elephant Stable', local: 'Gajashala', icon: '🐘', size: 3, hp: 1500, cost: { wood: 200, stone: 100 }, time: 40, age: 2, trains: ['elephant'], sight: 5, counts: true },
+    well: { name: 'Well', local: 'Kuan', icon: '', size: 1, hp: 500, cost: { stone: 50 }, time: 12, age: 0, sight: 2, mood: 3, farmBoost: 5 },
+    shmashan: { name: 'Cremation Ground', local: 'Shmashan Ghat', icon: '', size: 2, hp: 700, cost: { wood: 75, stone: 25 }, time: 18, age: 0, sight: 3, counts: true },
+    market: { name: 'Market', local: 'Haat', icon: '', size: 3, hp: 1200, cost: { wood: 175 }, time: 30, age: 1, sight: 5, counts: true },
+    gurukul: { name: 'Gurukul', local: 'Gurukul', icon: '', size: 3, hp: 1100, cost: { wood: 150, stone: 50 }, time: 30, age: 1, sight: 5, counts: true },
+    panchayat: { name: 'Village Council', local: 'Panchayat Chaupal', icon: '', size: 2, hp: 1000, cost: { wood: 100, stone: 100, gold: 50 }, time: 30, age: 1, sight: 5, counts: true, mood: 5 },
     workshop: { name: 'Siege Workshop', local: 'Yantrashala', icon: '⚙️', size: 3, hp: 1300, cost: { wood: 200, gold: 50 }, time: 40, age: 2, trains: ['ram', 'rocket'], sight: 5, counts: true },
 };
 
-const BUILD_MENU = ['house', 'farm', 'storehouse', 'barracks', 'range', 'stable', 'temple', 'university', 'tower', 'gajashala', 'workshop', 'tc'];
+const BUILD_MENU = ['house', 'farm', 'storehouse', 'well', 'shmashan', 'barracks', 'range', 'stable', 'temple', 'market', 'gurukul', 'panchayat', 'university', 'tower', 'gajashala', 'workshop', 'tc'];
 
 const TECHS = {
     plough: { name: 'Heavy plough', at: 'storehouse', age: 1, cost: { food: 125, wood: 125 }, time: 25, effect: 'Farms hold 50% more food and are worked 15% faster.' },
@@ -67,6 +72,11 @@ const TECHS = {
     stepwell: { name: 'Stepwell irrigation', at: 'university', age: 2, cost: { wood: 200, gold: 100 }, time: 30, effect: 'Farms are worked a further 20% faster.', source: 'Rani ki Vav' },
     ganita: { name: 'Ganita', at: 'university', age: 2, cost: { food: 200, gold: 200 }, time: 35, effect: 'All gathering 10% faster.', source: 'Brahmagupta and the rules of zero' },
     jyotisha: { name: 'Jyotisha', at: 'university', age: 2, cost: { food: 150, gold: 150 }, time: 30, effect: '+2 line of sight for all units and buildings.', source: 'Aryabhata\'s astronomy' },
+    pucca: { name: 'Pucca houses', at: 'storehouse', age: 1, cost: { wood: 150, stone: 100 }, time: 30, effect: 'Fired-brick houses: each house shelters 3 more people and is twice as strong.', source: 'Baked bricks of Harappa' },
+    roads: { name: 'Paved roads', at: 'panchayat', age: 1, cost: { stone: 150, gold: 50 }, time: 30, effect: 'Everyone walks 10% faster.', source: 'The Uttarapatha trade road' },
+    utsav: { name: 'Utsav', at: 'temple', age: 1, cost: { food: 150, gold: 75 }, time: 25, effect: 'Festivals last twice as long and lift spirits even more.' },
+    arthashastra: { name: 'Arthashastra', at: 'panchayat', age: 2, cost: { food: 200, gold: 150 }, time: 35, effect: 'Fair taxes bring in a steady flow of gold.', source: 'Kautilya\'s treatise on statecraft' },
+    fortified: { name: 'Durg walls', at: 'university', age: 2, cost: { stone: 300, gold: 100 }, time: 40, effect: 'Town Centers and towers get 50% more health and +2 attack.', source: 'Hill forts of the Deccan' },
     rockets: { name: 'Mysorean rockets', at: 'university', age: 3, cost: { wood: 300, gold: 300 }, time: 45, effect: 'Siege workshops can build Rocket Carts.', source: 'Hyder Ali and Tipu Sultan' },
     nalanda: { name: 'Nalanda', at: 'university', age: 3, cost: { food: 500, gold: 500 }, time: 50, effect: 'Villagers work 15% faster and population limit rises by 25.', source: 'The great university of Nalanda' },
 };
@@ -79,3 +89,29 @@ const RESOURCE_OBJECTS = {
 
 const GATHER_RATE = { food: 0.58, wood: 0.52, stone: 0.45, gold: 0.48, farm: 0.44, hunt: 0.75 };
 const CARRY = 10;
+
+// ---------- Village life ----------
+
+const YEAR = 60;          // seconds of play per year of life
+const ADULT_AGE = 14;
+const WORK_AGE = 6;
+const ELDER_AGE = 55;
+const FESTIVAL_CYCLE = 240; // seconds between one year's festivals and the next
+
+const NAMES = {
+    m: ['Arjun', 'Ravi', 'Vikram', 'Karthik', 'Anand', 'Bhima', 'Chandra', 'Dev', 'Gopal', 'Hari', 'Ishaan', 'Jayant', 'Kiran', 'Lakshman', 'Madhav', 'Nakul', 'Prakash', 'Raghav', 'Surya', 'Tarun', 'Uday', 'Varun', 'Yash', 'Arun', 'Bala', 'Murugan', 'Senthil', 'Raja', 'Govind', 'Mohan', 'Keshav', 'Nandan', 'Shankar', 'Vasu', 'Ajay', 'Bharat', 'Dhruv', 'Kabir', 'Manik', 'Satya', 'Tejas', 'Venkat', 'Ashok', 'Harsha', 'Kanha', 'Sahadev'],
+    f: ['Sita', 'Lakshmi', 'Meera', 'Radha', 'Parvati', 'Ganga', 'Kaveri', 'Anjali', 'Bhavani', 'Chitra', 'Durga', 'Gauri', 'Isha', 'Janaki', 'Kamala', 'Lata', 'Malini', 'Nandini', 'Padma', 'Rukmini', 'Savitri', 'Tara', 'Uma', 'Vasanthi', 'Yamuna', 'Amba', 'Kalyani', 'Meenakshi', 'Rani', 'Saraswati', 'Tulsi', 'Valli', 'Ahalya', 'Damayanti', 'Shakuntala', 'Aruna', 'Champa', 'Devika', 'Hema', 'Jaya', 'Kumud', 'Leela', 'Mohini', 'Priya', 'Revati', 'Sudha'],
+};
+
+const SKILLS = { food: 'Farming', wood: 'Woodcutting', stone: 'Stonework', gold: 'Mining', build: 'Building', fight: 'Fighting' };
+const SKILL_WORD = { food: 'farmer', wood: 'woodcutter', stone: 'stonemason', gold: 'miner', build: 'builder', fight: 'fighter' };
+const SKILL_LEVELS = [[0, 'Novice'], [25, 'Skilled'], [50, 'Expert'], [80, 'Master']];
+const RANKS = [[0, 'Sainik'], [3, 'Nayak'], [8, 'Senanayak'], [15, 'Mahasenapati']];
+
+// Festivals fall at fixed points in each year.
+const FESTIVALS = [
+    { at: 0.04, name: 'Makar Sankranti', local: 'Pongal', mood: 15, text: 'The harvest festival: every farm gives a gift of food.', kind: 'harvest' },
+    { at: 0.24, name: 'Holi', local: 'Festival of colours', mood: 20, text: 'People throw coloured powder and forget old quarrels.', kind: 'colours' },
+    { at: 0.58, name: 'Onam', local: 'Return of Mahabali', mood: 15, text: 'Flower carpets and feasts in every home.', kind: 'flowers' },
+    { at: 0.82, name: 'Diwali', local: 'Festival of lights', mood: 25, text: 'Lamps glow in every house and gold is offered to Lakshmi.', kind: 'lights' },
+];

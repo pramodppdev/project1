@@ -17,13 +17,16 @@
             <div id="resbar"></div>
             <div id="agebox"><span id="age-name">Vedic Age</span><span id="clock">0:00</span></div>
             <div class="top-actions">
-                <button id="btn-idle" title="Next idle villager (.)">Idle <b id="idle-n">0</b></button>
-                <button id="btn-army" title="Select all soldiers (,)">Army</button>
+                <button id="btn-people" title="Families, happiness and chronicle (L)"><svg class="ico" width="16" height="16" viewBox="0 0 24 24"></svg><span>People</span></button>
+                <button id="btn-idle" title="Next idle villager (.)"><svg class="ico" width="16" height="16" viewBox="0 0 24 24"></svg><span>Idle</span> <b id="idle-n">0</b></button>
+                <button id="btn-army" title="Select all soldiers (,)"><svg class="ico" width="16" height="16" viewBox="0 0 24 24"></svg><span>Army</span></button>
                 <button id="btn-pause" title="Pause (P)">Pause</button>
             </div>
         </header>
 
+        <div id="festival" hidden></div>
         <ul id="messages" aria-live="polite"></ul>
+        <div id="cursor-tip" hidden></div>
 
         <footer id="panel">
             <div id="mini-wrap"><canvas id="minimap" width="180" height="180" aria-label="Map"></canvas></div>
@@ -76,9 +79,21 @@
                     <li><b>Build</b>: select villagers and pick a building, then click where it should stand. Houses raise your population limit.</li>
                     <li><b>Advance</b>: build two buildings of your age, then research the next age at the Town Center.</li>
                     <li><b>Win</b>: destroy every rival Town Center and villager.</li>
-                    <li><b>Keys</b>: H town center, . idle villager, , army, Delete removes selection, Esc cancels, P pauses.</li>
+                    <li><b>People</b>: every villager has a name, an age and a family. Skills grow with the work they do. Married couples with a house have children, who grow up and learn. Elders pass away; a cremation ground lets families give the last rites.</li>
+                    <li><b>Happiness</b>: temples, wells, a village council, festivals, weddings and full granaries make people happy and work harder. Hunger, crowding and the unhonoured dead make them sad.</li>
+                    <li><b>Keys</b>: H town center, . idle villager, , army, L people, Delete removes selection, Esc cancels, P pauses.</li>
                 </ul>
                 <div class="actions"><button id="how-close" class="primary">Back</button></div>
+            </div>
+        </div>
+
+        <div id="people" class="sheet" hidden>
+            <div class="sheet-card wide">
+                <div class="tabs" role="tablist">
+                    <button data-tab="families" class="on">Families</button><button data-tab="mood">Happiness</button><button data-tab="chronicle">Chronicle</button>
+                    <button id="people-close" class="close" aria-label="Close">✕</button>
+                </div>
+                <div id="people-body"></div>
             </div>
         </div>
 
@@ -102,6 +117,8 @@
     <script src="https://cdn.jsdelivr.net/npm/three@0.149.0/build/three.min.js"></script>
     <script src="../rpg/js/worldgen.js"></script>
     <script src="js/data.js"></script>
+    <script src="js/icons.js"></script>
+    <script src="js/life.js"></script>
     <script src="js/map.js"></script>
     <script src="js/sim.js"></script>
     <script src="js/ai.js"></script>

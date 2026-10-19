@@ -7,7 +7,7 @@ const UI = { selected: [], placing: null, markers: [], drag: null, paused: false
 const HOTKEYS = 'QERTYUFGZXCVBNM';
 
 function fmtCost(cost) {
-    return Object.entries(cost || {}).map(([k, v]) => `${RES_ICON[k]} ${v}`).join('  ');
+    return Object.entries(cost || {}).map(([k, v]) => `<span class="cost-item">${icon(k, 14)}${v}</span>`).join(' ');
 }
 
 function mine(e) {
@@ -154,41 +154,47 @@ function commandList() {
     const vills = selVillagers();
     const units = selUnits();
     const b = selBuilding();
-    if (vills.length && vills.length === units.length) {
+    const builders = vills.filter(v => !isChild(v));
+    if (vills.length && vills.length === units.length && builders.length) {
         for (const type of BUILD_MENU) {
             const d = BUILDING_TYPES[type];
             if (d.age > player(G.human).age + 1) continue;
-            out.push({ icon: d.icon, label: d.name, cost: d.cost, desc: buildingDesc(type), lock: lockReason(G.human, 'build', type), act: () => startPlacing(type), on: UI.placing && UI.placing.type === type });
+            out.push({ img: PORTRAIT[type], label: d.name, cost: d.cost, desc: buildingDesc(type), lock: lockReason(G.human, 'build', type), act: () => startPlacing(type), on: UI.placing && UI.placing.type === type });
         }
     }
     if (units.length) {
-        out.push({ icon: '✋', label: 'Stop', desc: 'Stop what they are doing.', act: () => { for (const u of units) { u.task = null; u.path = []; } } });
-        out.push({ icon: '🗑️', label: 'Dismiss', desc: 'Send these units away for good.', act: () => { for (const u of units) kill(u, null); select([]); } });
+        out.push({ svg: icon('stop', 26), label: 'Stop', desc: 'Stop what they are doing.', act: () => { for (const u of units) { u.task = null; u.path = []; } } });
+        out.push({ svg: icon('dismiss', 26), label: 'Dismiss', desc: 'Send these people away from the kingdom for good.', act: () => { for (const u of units) leaveKingdom(u); select([]); } });
     }
     if (b && b.built) {
         for (const t of b.def.trains || []) {
             const d = UNIT_TYPES[t];
             if (d.age > player(G.human).age + 1) continue;
-            out.push({ icon: d.icon, label: d.name, cost: unitCost(G.human, t), desc: unitDesc(t), lock: lockReason(G.human, 'unit', t), act: ev => { const n = ev && ev.shiftKey ? 5 : 1; for (let k = 0; k < n; k++) if (!enqueue(b, { unit: t })) { noAfford(unitCost(G.human, t)); break; } } });
+            const label = t === 'villager' ? 'New settler' : d.name;
+            const desc = t === 'villager' ? 'A young man or woman from a nearby village joins your kingdom. Families also grow by themselves when couples have children.' : unitDesc(t);
+            out.push({ img: t === 'villager' ? PORTRAIT.villager_m : PORTRAIT[t], label, cost: unitCost(G.human, t), desc, lock: lockReason(G.human, 'unit', t), act: ev => { const n = ev && ev.shiftKey ? 5 : 1; for (let k = 0; k < n; k++) if (!enqueue(b, { unit: t })) { noAfford(unitCost(G.human, t)); break; } } });
         }
         if (b.type === 'tc') {
             const next = AGES[player(G.human).age + 1];
             const busy = [...G.ents.values()].some(e => e.owner === G.human && e.kind === 'building' && e.queue.some(q => q.age));
-            if (next && !busy) out.push({ icon: '🏛️', label: next.name, cost: next.cost, desc: `Advance to the ${next.name} (${next.local}). Unlocks new buildings, units and technologies.`, lock: lockReason(G.human, 'age'), act: () => { if (!enqueue(b, { age: true })) noAfford(next.cost); } });
+            if (next && !busy) out.push({ svg: icon('age', 28), label: next.name, cost: next.cost, desc: `Advance to the ${next.name} (${next.local}). Unlocks new buildings, units and technologies.`, lock: lockReason(G.human, 'age'), act: () => { if (!enqueue(b, { age: true })) noAfford(next.cost); } });
         }
         for (const [k, t] of Object.entries(TECHS)) {
             if (t.at !== b.type || hasTech(G.human, k)) continue;
             const queued = [...G.ents.values()].some(e => e.owner === G.human && e.kind === 'building' && e.queue.some(q => q.tech === k));
             if (queued || t.age > player(G.human).age + 1) continue;
-            out.push({ icon: techIcon(k), label: t.name, cost: t.cost, desc: `${t.effect}${t.source ? ` <i>${t.source}.</i>` : ''}`, lock: lockReason(G.human, 'tech', k), act: () => { if (!enqueue(b, { tech: k })) noAfford(t.cost); } });
+            out.push({ svg: icon(k, 28), label: t.name, cost: t.cost, desc: `${t.effect}${t.source ? ` <i>${t.source}.</i>` : ''}`, lock: lockReason(G.human, 'tech', k), act: () => { if (!enqueue(b, { tech: k })) noAfford(t.cost); } });
+        }
+        if (b.type === 'market') {
+            const pr = player(G.human).prices;
+            for (const r of ['food', 'wood', 'stone']) {
+                out.push({ svg: `<span class="trade">${icon('buy', 14)}${icon(r, 22)}</span>`, label: `Buy ${r}`, cost: { gold: Math.round(pr[r]) }, desc: `Buy 100 ${r} for ${Math.round(pr[r])} gold. Prices rise as you buy.`, act: () => { if (!trade(G.human, r, true)) noAfford({ gold: Math.round(pr[r]) }); } });
+                out.push({ svg: `<span class="trade">${icon('sell', 14)}${icon(r, 22)}</span>`, label: `Sell ${r}`, cost: { [r]: 100 }, desc: `Sell 100 ${r} for ${Math.round(pr[r] * 0.75)} gold.`, act: () => { if (!trade(G.human, r, false)) noAfford({ [r]: 100 }); } });
+            }
         }
     }
-    if (b) out.push({ icon: '🗑️', label: b.built ? 'Demolish' : 'Cancel', desc: b.built ? 'Pull this building down.' : 'Cancel construction and get the resources back.', act: () => { if (!b.built) pay(G.human, b.def.cost, -1); kill(b, null); select([]); } });
+    if (b) out.push({ svg: icon('demolish', 26), label: b.built ? 'Demolish' : 'Cancel', desc: b.built ? 'Pull this building down.' : 'Cancel construction and get the resources back.', act: () => { if (!b.built) pay(G.human, b.def.cost, -1); kill(b, null); select([]); } });
     return out;
-}
-
-function techIcon(k) {
-    return { plough: '🪓', bowsaw: '🪚', mining: '⛏️', wootz: '🗡️', dhanurveda: '🏹', ayurveda: '🌿', ironarmour: '🛡️', stepwell: '💧', ganita: '🔢', jyotisha: '🔭', rockets: '🚀', nalanda: '📚' }[k] || '📜';
 }
 
 function noAfford(cost) {
@@ -224,13 +230,23 @@ function buildingDesc(t) {
 function renderTop() {
     const p = player(G.human);
     const pop = popOf(G.human);
-    $('resbar').innerHTML = RES_KEYS.map(k => `<span class="res" title="${RES_NAME[k]}">${RES_ICON[k]} ${Math.floor(p.res[k])}</span>`).join('')
-        + `<span class="res${pop.used >= pop.cap ? ' short' : ''}" title="Population">👥 ${pop.used}<small>/${pop.cap}</small></span>`;
+    $('resbar').innerHTML = RES_KEYS.map(k => `<span class="res" title="${RES_NAME[k]}">${icon(k, 20)}${Math.floor(p.res[k])}</span>`).join('')
+        + `<span class="res${pop.used >= pop.cap ? ' short' : ''}" title="Population: people / homes">${icon('pop', 20)}${pop.used}<small>/${pop.cap}</small></span>`
+        + `<button class="res mood" id="mood-btn" title="Happiness of your people">${moodIcon(p.mood, 20)}${Math.round(p.mood)}</button>`;
+    $('mood-btn').onclick = () => openPeople('mood');
     $('age-name').textContent = AGES[p.age].name;
     const s = Math.floor(G.time);
-    $('clock').textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+    const year = Math.floor(G.time / YEAR) + 1;
+    $('clock').textContent = `Year ${year} · ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
     $('idle-n').textContent = idleVillagers().length;
-    $('btn-pause').textContent = UI.paused ? 'Resume' : 'Pause';
+    $('btn-pause').innerHTML = `${icon(UI.paused ? 'play' : 'pause', 16)}<span>${UI.paused ? 'Resume' : 'Pause'}</span>`;
+    const f = p.festival;
+    const fb = $('festival');
+    if (f) {
+        fb.hidden = false;
+        fb.className = `fest-${f.kind}`;
+        fb.innerHTML = `<b>${f.name}</b> · ${f.local}`;
+    } else fb.hidden = true;
 }
 
 function taskText(u) {
@@ -246,6 +262,35 @@ function taskText(u) {
     return '';
 }
 
+function skillBars(u) {
+    return `<div class="skills">${Object.entries(SKILLS).map(([k, name]) => {
+        const v = u.person.skills[k];
+        return `<div class="skill" title="${name}: ${skillLevel(v)} (${Math.floor(v)}/100)"><span>${name}</span><i style="--v:${v}%"></i><b>${skillLevel(v)}</b></div>`;
+    }).join('')}</div>`;
+}
+
+function personLine(u) {
+    const a = Math.floor(ageOf(u));
+    const pl = player(u.owner);
+    const stage = a < WORK_AGE ? (u.person.female ? 'Little girl' : 'Little boy') : a < ADULT_AGE ? (u.person.female ? 'Girl' : 'Boy') : a >= ELDER_AGE ? (u.person.female ? 'Elder woman' : 'Elder man') : u.person.female ? 'Woman' : 'Man';
+    const bits = [`${stage}, ${a}`];
+    if (pl.mukhiya === u.id) bits.unshift(`${icon('crown', 14)} Mukhiya`);
+    if (u.def.cls !== 'villager') bits.unshift(`${icon('star', 14)} ${RANKS[rankOf(u)][1]}${u.person.kills ? ` · ${u.person.kills} defeated` : ''}`);
+    return bits.join(' · ');
+}
+
+function familyLine(u) {
+    const fam = familyOf(u);
+    const out = [];
+    if (fam) out.push(`<button class="link" data-family="${fam.id}">${fam.name}</button>`);
+    if (u.person.spouse) {
+        const s = G.ents.get(u.person.spouse);
+        if (s && !s.dead) out.push(`${u.person.female ? 'wife of' : 'husband of'} <button class="link" data-person="${s.id}">${s.person.name}</button>`);
+    }
+    if (u.person.parents) out.push(`${u.person.female ? 'daughter' : 'son'} of ${u.person.parents.join(' and ')}`);
+    return out.join(' · ');
+}
+
 function renderInfo() {
     const sel = UI.selected.filter(e => !e.dead && (e.kind !== 'carcass' || e.food > 0));
     if (sel.length !== UI.selected.length) UI.selected = sel;
@@ -253,38 +298,79 @@ function renderInfo() {
     if (!sel.length) {
         const p = player(G.human);
         const next = AGES[p.age + 1];
-        el.innerHTML = `<h3>${CIVS[p.civ].name} · ${AGES[p.age].name}</h3><div class="sub">${CIVS[p.civ].bonus}</div>`
-            + (next ? `<div class="sub" style="margin-top:6px">Next: <b>${next.name}</b> — ${fmtCost(next.cost)}. ${ageReady(G.human) || 'Ready to research at the Town Center.'}</div>` : '')
-            + `<div class="sub" style="margin-top:6px">${UI.touch ? 'Tap a unit to select it. Drag to look around, pinch to zoom.' : 'Click or drag-select units. Right-click to command.'}</div>`;
+        const fams = p.families.size;
+        el.innerHTML = `<div class="head"><div><h3>${CIVS[p.civ].name} · ${AGES[p.age].name}</h3><div class="sub">${CIVS[p.civ].bonus}</div></div></div>`
+            + (next ? `<div class="sub">Next: <b>${next.name}</b> ${fmtCost(next.cost)} — ${ageReady(G.human) || 'ready to research at the Town Center.'}</div>` : '')
+            + `<div class="sub">${fams} families · ${moodIcon(p.mood, 14)} ${moodWord(p.mood)} · next festival: ${nextFestival()}</div>`
+            + `<div class="sub">${UI.touch ? 'Tap a person to select. Drag to look around, pinch to zoom.' : 'Click or drag-select people. Right-click to give orders.'}</div>`;
         return;
     }
     if (sel.length > 1) {
         const groups = {};
-        for (const u of sel) (groups[u.type] = groups[u.type] || []).push(u);
-        el.innerHTML = `<h3>${sel.length} units</h3><div class="group">${Object.entries(groups).map(([t, us]) => `<button data-type="${t}" title="Select only ${UNIT_TYPES[t].name}">${UNIT_TYPES[t].icon} ${us.length}</button>`).join('')}</div>`;
-        el.querySelectorAll('[data-type]').forEach(btn => btn.onclick = () => select(sel.filter(u => u.type === btn.dataset.type)));
+        for (const u of sel) {
+            const k = u.type === 'villager' ? (isChild(u) ? 'children' : 'villager') : u.type;
+            (groups[k] = groups[k] || []).push(u);
+        }
+        el.innerHTML = `<h3>${sel.length} selected</h3><div class="group">${Object.entries(groups).map(([t, us]) => `<button data-type="${t}" title="Select only these">${t === 'children' ? `<img src="${PORTRAIT.child_m}" alt="">` : `<img src="${t === 'villager' ? PORTRAIT.villager_m : PORTRAIT[t]}" alt="">`}<b>${us.length}</b></button>`).join('')}</div>`
+            + `<div class="names">${sel.slice(0, 14).map(u => `<button class="link" data-person="${u.id}">${u.person ? u.person.name : u.def.name}</button>`).join(', ')}${sel.length > 14 ? ` and ${sel.length - 14} more` : ''}</div>`;
+        el.querySelectorAll('[data-type]').forEach(btn => btn.onclick = () => select(sel.filter(u => (u.type === 'villager' ? (isChild(u) ? 'children' : 'villager') : u.type) === btn.dataset.type)));
+        wireLinks(el);
         return;
     }
     const e = sel[0];
     const owner = e.owner >= 0 ? player(e.owner).name : e.kind === 'unit' && e.def.cls === 'animal' ? 'Wild animal' : '';
-    let html = `<span class="big-icon">${e.def.icon || '🍖'}</span><h3>${e.def.name}</h3><div class="sub">${e.def.local ? `${e.def.local} · ` : ''}${owner}</div>`;
-    if (e.hp !== undefined) html += `<div class="bar"><i style="width:${Math.max(0, e.hp / e.maxHp) * 100}%"></i></div><div class="stats"><span>❤️ ${Math.ceil(e.hp)}/${e.maxHp}</span>`;
+    const pic = portraitFor(e);
+    const title = e.person ? e.person.name : e.def.name;
+    const sub = e.person ? `${e.def.name}${e.def.local ? ` (${e.def.local})` : ''} · ${owner}` : `${e.def.local ? `${e.def.local} · ` : ''}${owner}`;
+    let html = `<div class="head">${pic ? `<img class="portrait" src="${pic}" alt="">` : ''}<div class="who"><h3>${title}</h3><div class="sub">${sub}</div>`;
+    if (e.hp !== undefined) html += `<div class="bar"><i style="width:${Math.max(0, e.hp / e.maxHp) * 100}%"></i></div><div class="stats"><span>${icon('heart', 14)} ${Math.ceil(e.hp)}/${e.maxHp}</span>`;
     if (e.kind === 'unit') {
-        if (e.def.cls !== 'animal') html += `<span>⚔️ ${unitAtk(e)}</span><span>🛡️ ${armourOf(e, false)}/${armourOf(e, true)}</span>${e.def.range > 1.5 ? `<span>🎯 ${unitRange(e)}</span>` : ''}`;
-        html += `</div><div class="sub">${e.def.cls === 'animal' ? `${e.def.food} food when hunted` : taskText(e)}${e.carry && e.carry.amt >= 1 ? ` · carrying ${Math.floor(e.carry.amt)} ${e.carry.res}` : ''}</div>`;
+        if (e.def.cls !== 'animal') html += `<span>${icon('sword', 14)} ${Math.round(unitAtk(e) * 10) / 10}</span><span>${icon('shield', 14)} ${armourOf(e, false)}/${armourOf(e, true)}</span>${e.def.range > 1.5 ? `<span>${icon('range', 14)} ${unitRange(e)}</span>` : ''}`;
+        html += '</div></div></div>';
+        if (e.person) html += `<div class="sub">${personLine(e)}</div><div class="sub">${familyLine(e)}</div>`;
+        html += `<div class="sub doing">${e.def.cls === 'animal' ? `${e.def.food} food when hunted` : ageOf(e) < WORK_AGE ? 'Too young to work — plays near home' : taskText(e)}${e.carry && e.carry.amt >= 1 ? ` · carrying ${Math.floor(e.carry.amt)} ${icon(e.carry.res, 14)}` : ''}</div>`;
+        if (e.person && e.owner === G.human) {
+            const best = bestSkill(e);
+            html += `<div class="sub best">${best && best[1] >= 1 ? `Best at ${SKILLS[best[0]].toLowerCase()}: ${skillLevel(best[1])} (${Math.floor(best[1])})` : 'Still learning every trade'}</div>`;
+            html += skillBars(e);
+        }
     } else if (e.kind === 'building') {
-        html += '</div>';
+        html += '</div></div></div>';
         if (!e.built) html += `<div class="sub">Under construction: ${Math.floor(e.progress * 100)}%</div>`;
-        else if (e.type === 'farm') html += `<div class="sub">${Math.floor(e.food)} food left</div>`;
-        else if (e.def.pop) html += `<div class="sub">Shelters ${e.def.pop} people</div>`;
+        else if (e.type === 'farm') html += `<div class="sub">${Math.floor(e.food)} food left${wellNear(e) ? ' · watered by a well (+10%)' : ''}</div>`;
+        else if (e.def.pop) {
+            const fam = [...player(e.owner).families.values()].find(f => f.home === e.id);
+            html += `<div class="sub">Shelters ${e.def.pop + (e.type === 'house' && hasTech(e.owner, 'pucca') ? 3 : 0)} people${fam ? ` · home of <button class="link" data-family="${fam.id}">${fam.name}</button>` : e.type === 'house' ? ' · empty, waiting for a newly-wed couple' : ''}</div>`;
+        }
+        if (e.type === 'shmashan') html += `<div class="sub">${(e.pyreUntil || 0) > G.time ? 'A pyre is burning. The family grieves.' : 'The dead are given their last rites here.'}</div>`;
+        if (e.type === 'panchayat') { const m = G.ents.get(player(e.owner).mukhiya); html += `<div class="sub">${m ? `Mukhiya: <button class="link" data-person="${m.id}">${m.person.name}</button> (all work +5%)` : 'Choosing a Mukhiya…'}</div>`; }
+        if (e.type === 'gurukul') html += '<div class="sub">Children aged 5 and up learn every trade here.</div>';
+        if (e.type === 'well') html += '<div class="sub">Lifts spirits and waters farms within 5 steps (+10% food).</div>';
         if (mine(e) && e.queue.length) {
-            html += `<div class="queue">${e.queue.map((q, k) => `<button data-q="${k}" title="Cancel">${q.unit ? UNIT_TYPES[q.unit].icon : q.tech ? techIcon(q.tech) : '🏛️'}${k === 0 ? `<i style="width:${Math.min(1, q.t / q.time) * 100}%"></i>` : ''}</button>`).join('')}</div>`;
+            html += `<div class="queue">${e.queue.map((q, k) => `<button data-q="${k}" title="Cancel">${q.unit ? `<img src="${q.unit === 'villager' ? PORTRAIT.villager_m : PORTRAIT[q.unit]}" alt="">` : q.tech ? icon(q.tech, 24) : icon('age', 24)}${k === 0 ? `<i style="width:${Math.min(1, q.t / q.time) * 100}%"></i>` : ''}</button>`).join('')}</div>`;
         }
     } else if (e.kind === 'carcass') {
-        html += `<div class="sub">${Math.floor(e.food)} food left</div>`;
+        html += `</div></div><div class="sub">${Math.floor(e.food)} food left</div>`;
     }
     el.innerHTML = html;
     el.querySelectorAll('[data-q]').forEach(btn => btn.onclick = () => { cancelQueue(e, +btn.dataset.q); UI.panelKey = ''; });
+    wireLinks(el);
+}
+
+function wireLinks(el) {
+    el.querySelectorAll('[data-person]').forEach(btn => btn.onclick = () => { const u = G.ents.get(+btn.dataset.person); if (u && !u.dead) { select([u]); lookAt(u.x, u.y); } });
+    el.querySelectorAll('[data-family]').forEach(btn => btn.onclick = () => openPeople('families', +btn.dataset.family));
+}
+
+function moodWord(m) {
+    return m >= 80 ? 'joyful' : m >= 65 ? 'content' : m >= 45 ? 'uneasy' : m >= 25 ? 'unhappy' : 'miserable';
+}
+
+function nextFestival() {
+    const yearT = (G.time / FESTIVAL_CYCLE) % 1;
+    const next = FESTIVALS.find(f => f.at > yearT) || FESTIVALS[0];
+    const wait = ((next.at - yearT + 1) % 1) * FESTIVAL_CYCLE;
+    return `${next.name} in ${Math.ceil(wait / 60) > 1 ? `${Math.ceil(wait / 60)} min` : `${Math.ceil(wait)} s`}`;
 }
 
 let cmdItems = [];
@@ -292,7 +378,7 @@ let cmdItems = [];
 function renderCommands() {
     cmdItems = commandList();
     const el = $('commands');
-    el.innerHTML = cmdItems.map((c, k) => `<button class="cmd" data-k="${k}"${c.lock ? ' aria-disabled="true" style="opacity:.42"' : ''}${c.on ? ' style="border-color:var(--saffron)"' : ''}>${c.icon}<span>${c.label}</span>${k < HOTKEYS.length ? `<kbd>${HOTKEYS[k]}</kbd>` : ''}</button>`).join('');
+    el.innerHTML = cmdItems.map((c, k) => `<button class="cmd${c.on ? ' on' : ''}" data-k="${k}"${c.lock ? ' aria-disabled="true"' : ''}>${c.img ? `<img src="${c.img}" alt="">` : c.svg}<span>${c.label}</span>${k < HOTKEYS.length ? `<kbd>${HOTKEYS[k]}</kbd>` : ''}</button>`).join('');
     el.querySelectorAll('.cmd').forEach(btn => {
         const c = cmdItems[+btn.dataset.k];
         btn.onclick = ev => runCommand(c, ev);
@@ -312,7 +398,7 @@ function runCommand(c, ev) {
 function showHint(btn, c) {
     if (UI.touch) return;
     const r = player(G.human).res;
-    const cost = c.cost ? `<div class="cost">${Object.entries(c.cost).map(([k, v]) => `<span class="${r[k] < v ? 'no' : ''}">${RES_ICON[k]} ${v}</span>`).join('')}</div>` : '';
+    const cost = c.cost ? `<div class="cost">${Object.entries(c.cost).map(([k, v]) => `<span class="${r[k] < v ? 'no' : ''}">${icon(k, 14)} ${v}</span>`).join('')}</div>` : '';
     const h = $('hint');
     h.innerHTML = `<b>${c.label}</b><div>${c.desc || ''}</div>${cost}${c.lock ? `<div class="why">${c.lock}</div>` : ''}`;
     h.hidden = false;
@@ -359,7 +445,7 @@ function updatePanels() {
             const c = items[k];
             if (!c) return;
             cmdItems[k] = c;
-            btn.style.opacity = c.lock || (c.cost && !canAfford(G.human, c.cost)) ? '.42' : '';
+            btn.classList.toggle('dim', !!(c.lock || (c.cost && !canAfford(G.human, c.cost))));
         });
     }
     renderMessages();
@@ -506,6 +592,12 @@ function initInput() {
     mm.addEventListener('pointermove', e => { if (miniDrag) { const w = miniToWorld(e); lookAt(w.x, w.z); } });
     mm.addEventListener('pointerup', () => { miniDrag = false; });
 
+    $('btn-people').innerHTML = `${icon('people', 18)}<span>People</span>`;
+    $('btn-idle').innerHTML = `${icon('idle', 18)}<span>Idle</span> <b id="idle-n">0</b>`;
+    $('btn-army').innerHTML = `${icon('army', 18)}<span>Army</span>`;
+    $('btn-people').onclick = () => openPeople('families');
+    $('people-close').onclick = closePeople;
+    document.querySelectorAll('#people .tabs [data-tab]').forEach(b => b.onclick = () => openPeople(b.dataset.tab));
     $('btn-idle').onclick = nextIdle;
     $('btn-army').onclick = selectArmy;
     $('btn-pause').onclick = () => setPaused(!UI.paused);
@@ -547,6 +639,8 @@ function onMove(e) {
         return;
     }
     if (UI.placing && (!UI.drag || UI.drag.mode !== 'pan' || !UI.drag.moved)) UI.placing.tile = placingTileAt(x, y);
+    if (e.pointerType === 'mouse' && UI.mouse.inside && !UI.drag) updateHover(x, y, e.clientX, e.clientY);
+    else if (!UI.mouse.inside) { UI.hover = null; $('cursor-tip').hidden = true; }
     const d = UI.drag;
     if (!d || !p) return;
     d.x1 = x;
@@ -636,6 +730,7 @@ function onKey(e) {
     keys.add(k);
     if (k === 'escape') {
         if (UI.placing) UI.placing = null;
+        else if (!$('people').hidden) closePeople();
         else if (!$('pausebox').hidden) setPaused(false);
         else select([]);
         return;
@@ -648,6 +743,7 @@ function onKey(e) {
         return;
     }
     if (k === 'h') { selectTC(); return; }
+    if (k === 'l') { if ($('people').hidden) openPeople('families'); else closePeople(); return; }
     if (k === '.') { nextIdle(); return; }
     if (k === ',') { selectArmy(); return; }
     if (k === ' ' && G.alertPos) { lookAt(G.alertPos[0], G.alertPos[1]); e.preventDefault(); return; }
@@ -683,4 +779,114 @@ function edgeAndKeyScroll(dt) {
         camTarget.z += dz * sp;
         clampCamera();
     }
+}
+
+// ---------- Hover: what is under the cursor and what a right-click would do ----------
+
+let hoverAt = 0;
+
+function updateHover(x, y, cx, cy) {
+    const now = performance.now();
+    if (now - hoverAt < 70) return;
+    hoverAt = now;
+    const tip = $('cursor-tip');
+    const cv = $('world');
+    if (UI.placing) {
+        UI.hover = null;
+        tip.hidden = false;
+        const d = BUILDING_TYPES[UI.placing.type];
+        tip.innerHTML = `<b>${d.name}</b> ${UI.placing.ok ? 'Click to place' : '<span class="no">Blocked here</span>'} · right-click to cancel`;
+        placeTip(tip, cx, cy);
+        cv.style.cursor = 'copy';
+        return;
+    }
+    const pick = pickAt(x, y);
+    UI.hover = pick;
+    const units = selUnits();
+    const vills = units.filter(u => u.def.cls === 'villager' && canWork(u));
+    let what = '';
+    let act = '';
+    let cursor = 'default';
+    const e = pick.ent;
+    if (e) {
+        what = e.person ? `<b>${e.person.name}</b> ${e.def.name.toLowerCase()}, ${Math.floor(ageOf(e))}` : `<b>${e.def.name}</b>`;
+        if (e.owner >= 0 && e.owner !== G.human) what += ` · <span class="no">${player(e.owner).name}</span>`;
+        if (e.kind === 'carcass') what += ` · ${Math.floor(e.food)} food`;
+        if (e.kind === 'building' && e.type === 'farm' && e.built) what += ` · ${Math.floor(e.food)} food`;
+        if (units.length) {
+            if (e.owner >= 0 && e.owner !== G.human && e.kind !== 'carcass') { act = 'Attack'; cursor = 'crosshair'; }
+            else if (e.kind === 'unit' && e.def.cls === 'animal') { act = vills.length ? 'Hunt' : 'Attack'; cursor = 'crosshair'; }
+            else if (e.kind === 'carcass' && vills.length) { act = 'Gather food'; cursor = 'pointer'; }
+            else if (mine(e) && e.kind === 'building' && vills.length) {
+                act = !e.built ? 'Help build' : e.hp < e.maxHp ? 'Repair' : e.type === 'farm' ? 'Farm here' : e.def.drop && vills.some(v => v.carry) ? 'Drop off' : 'Go here';
+                cursor = 'pointer';
+            }
+        }
+    } else if (pick.tile !== undefined) {
+        const r = tileRes(pick.tile);
+        const names = { T: 'Tree', J: 'Banyan tree', P: 'Pine', Y: 'Bamboo', L: 'Palm', G: 'Mangrove', c: 'Acacia', $: 'Gold mine', '%': 'Stone quarry', '*': 'Berry bushes' };
+        what = `<b>${names[objects[pick.tile]] || 'Resource'}</b> · ${Math.ceil(r.left)} ${icon(r.res, 14)}`;
+        if (vills.length) { act = { food: 'Gather berries', wood: 'Chop wood', stone: 'Quarry stone', gold: 'Mine gold' }[r.res]; cursor = 'pointer'; }
+    }
+    cv.style.cursor = cursor;
+    if (!what) { tip.hidden = true; return; }
+    tip.hidden = false;
+    tip.innerHTML = what + (act ? `<div class="act">Right-click: ${act}</div>` : '');
+    placeTip(tip, cx, cy);
+}
+
+function placeTip(tip, cx, cy) {
+    const w = tip.offsetWidth;
+    tip.style.left = `${Math.min(window.innerWidth - w - 8, cx + 16)}px`;
+    tip.style.top = `${Math.max(8, cy - 34)}px`;
+}
+
+// ---------- People sheet: families, happiness and the chronicle ----------
+
+let peopleTab = 'families';
+
+function openPeople(tab, famId) {
+    peopleTab = tab || peopleTab;
+    $('people').hidden = false;
+    document.querySelectorAll('#people .tabs [data-tab]').forEach(b => b.classList.toggle('on', b.dataset.tab === peopleTab));
+    renderPeople(famId);
+}
+
+function closePeople() {
+    $('people').hidden = true;
+}
+
+function renderPeople(famId) {
+    const p = player(G.human);
+    const body = $('people-body');
+    if (peopleTab === 'mood') {
+        body.innerHTML = `<div class="mood-big">${moodIcon(p.mood, 40)}<div><b>${Math.round(p.mood)}</b> — your people are ${moodWord(p.mood)}<div class="sub">Happiness changes how fast everyone works (${Math.round((moodMult(G.human) - 1) * 100) >= 0 ? '+' : ''}${Math.round((moodMult(G.human) - 1) * 100)}%) and how often families have children.</div></div></div>`
+            + `<table class="mood-parts">${p.moodParts.map(([n, v]) => `<tr><td>${n}</td><td class="${v < 0 ? 'no' : 'yes'}">${v > 0 ? '+' : ''}${v}</td></tr>`).join('')}</table>`
+            + `<h4>Festivals</h4><div class="fest-list">${FESTIVALS.map(f => `<div class="fest-${f.kind}"><b>${f.name}</b> <span class="sub">${f.local}</span><div class="sub">${f.text}</div></div>`).join('')}</div><div class="sub">Next: ${nextFestival()}. A temple doubles the joy of every festival.</div>`;
+        return;
+    }
+    if (peopleTab === 'chronicle') {
+        body.innerHTML = p.chronicle.length ? `<ol class="chronicle">${p.chronicle.map(c => `<li class="${c.kind}"><span class="when">Year ${Math.floor(c.t / YEAR) + 1}</span>${c.text}</li>`).join('')}</ol>` : '<p class="sub">Nothing has happened yet. Weddings, births, festivals and deaths will be written here.</p>';
+        return;
+    }
+    const fams = [...p.families.values()].sort((a, b) => b.members.size - a.members.size);
+    const people = [...G.ents.values()].filter(e => e.owner === G.human && !e.dead && e.person);
+    const kids = people.filter(e => isChild(e)).length;
+    const elders = people.filter(e => ageOf(e) >= ELDER_AGE).length;
+    const women = people.filter(e => e.person.female).length;
+    const head = G.ents.get(p.mukhiya);
+    body.innerHTML = `<div class="sub summary">${people.length} people in ${fams.length} families · ${women} women, ${people.length - women} men · ${kids} children · ${elders} elders${head ? ` · Mukhiya ${icon('crown', 14)} <button class="link" data-person="${head.id}">${head.person.name}</button>` : ' · build a Village Council to choose a Mukhiya'}</div>`
+        + `<div class="families">${fams.map(f => {
+            const members = [...f.members].map(id => G.ents.get(id)).filter(m => m && !m.dead).sort((a, b) => ageOf(b) - ageOf(a));
+            const headM = familyHead(f);
+            const home = f.home && G.ents.get(f.home);
+            return `<section class="family${f.id === famId ? ' focus' : ''}" id="fam-${f.id}"><h4>${f.name}</h4><div class="sub">${home && !home.dead ? `Lives in the ${home.def.name.toLowerCase()}` : 'No home yet'} · ${members.length} ${members.length === 1 ? 'member' : 'members'}</div><ul>${members.map(m => {
+                const best = bestSkill(m);
+                const tag = m === headM ? '<span class="tag">Head</span>' : '';
+                const job = ageOf(m) < WORK_AGE ? 'at play' : m.def.cls !== 'villager' ? RANKS[rankOf(m)][1] : taskText(m).toLowerCase();
+                return `<li><img src="${portraitFor(m)}" alt=""><button class="link" data-person="${m.id}">${m.person.name}</button>${tag}<span class="sub">${m.person.female ? '♀' : '♂'} ${Math.floor(ageOf(m))} · ${job}${best && best[1] >= 25 ? ` · ${skillLevel(best[1])} ${SKILL_WORD[best[0]]}` : ''}</span></li>`;
+            }).join('')}</ul></section>`;
+        }).join('')}</div>`;
+    body.querySelectorAll('[data-person]').forEach(btn => btn.onclick = () => { const u = G.ents.get(+btn.dataset.person); if (u && !u.dead) { closePeople(); select([u]); lookAt(u.x, u.y); } });
+    if (famId) { const el = $(`fam-${famId}`); if (el) el.scrollIntoView({ block: 'center' }); }
 }

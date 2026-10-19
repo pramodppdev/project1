@@ -29,10 +29,10 @@ function enemyDirection(p) {
 }
 
 function aiMine(p) {
-    const out = { vills: [], army: [], buildings: [], tc: null, byType: {}, pending: {} };
+    const out = { vills: [], kids: [], army: [], buildings: [], tc: null, byType: {}, pending: {} };
     for (const e of G.ents.values()) {
         if (e.owner !== p.id || e.dead) continue;
-        if (e.kind === 'unit') (e.def.cls === 'villager' ? out.vills : out.army).push(e);
+        if (e.kind === 'unit') (e.def.cls === 'villager' ? (canWork(e) ? out.vills : out.kids) : out.army).push(e);
         else {
             out.buildings.push(e);
             out.byType[e.type] = (out.byType[e.type] || 0) + 1;
@@ -70,7 +70,7 @@ function aiBuild(p, me, type, near, dmin = 3, dmax = 14, builders = 1) {
     if (def.age > p.age || !canAfford(p.id, def.cost)) return false;
     const spot = aiSpot(p, type, near || [me.tc.x, me.tc.y], dmin, dmax) || (near ? null : aiSpot(p, type, [me.tc.x, me.tc.y], dmax, dmax + 10));
     if (!spot) return 'nospot';
-    const free = me.vills.filter(v => !v.task || v.task.type === 'gather').sort((a, b) => Math.hypot(a.x - spot[0], a.y - spot[1]) - Math.hypot(b.x - spot[0], b.y - spot[1]));
+    const free = me.vills.filter(v => (!v.task || v.task.type === 'gather') && !isChild(v)).sort((a, b) => Math.hypot(a.x - spot[0], a.y - spot[1]) - Math.hypot(b.x - spot[0], b.y - spot[1]));
     const crew = free.slice(0, builders);
     if (!crew.length) return false;
     return !!tryPlace(p.id, type, spot[0], spot[1], crew);
@@ -122,12 +122,12 @@ function aiThink(p) {
     if (!wild && !freeFarm && foodVills < shares.food * me.vills.length - 1) {
         farmFirst = true;
         const spot = aiSpot(p, 'farm', [me.tc.x, me.tc.y], 3, 10);
-        const v = me.vills.find(v => v.task && v.task.type === 'gather' && v.task.res !== 'food') || me.vills.find(v => !v.task);
+        const v = me.vills.find(v => v.task && v.task.type === 'gather' && v.task.res !== 'food' && !isChild(v)) || me.vills.find(v => !v.task && !isChild(v));
         if (spot && v && canAfford(p.id, BUILDING_TYPES.farm.cost)) tryPlace(p.id, 'farm', spot[0], spot[1], [v]);
     }
 
     // Buildings for each age.
-    const want = [['barracks', 0, 9], ['storehouse', 0, 7], ['range', 1, 0], ['university', 1, 0], ['stable', 1, 0], ['temple', 1, 0], ['tower', 1, 0], ['gajashala', 2, 0], ['workshop', 2, 0], ['barracks', 2, 0], ['tower', 2, 0]];
+    const want = [['barracks', 0, 9], ['storehouse', 0, 7], ['shmashan', 0, 11], ['well', 0, 14], ['panchayat', 1, 0], ['range', 1, 0], ['university', 1, 0], ['stable', 1, 0], ['temple', 1, 0], ['gurukul', 1, 0], ['tower', 1, 0], ['gajashala', 2, 0], ['workshop', 2, 0], ['barracks', 2, 0], ['tower', 2, 0]];
     const seen = {};
     for (const [type, age, vills] of farmFirst ? [] : want) {
         seen[type] = (seen[type] || 0) + 1;
@@ -234,7 +234,7 @@ function aiGather(p, me, v, res) {
         if (berry >= 0) { cmdGatherTile([v], berry); return true; }
         const farm = me.buildings.find(b => b.type === 'farm' && b.built && b.food > 0 && !farmTaken(b, v));
         if (farm) { cmdGatherEnt([v], farm); return true; }
-        if (canAfford(p.id, BUILDING_TYPES.farm.cost)) {
+        if (!isChild(v) && canAfford(p.id, BUILDING_TYPES.farm.cost)) {
             const spot = aiSpot(p, 'farm', [me.tc.x, me.tc.y], 3, 9);
             if (spot && tryPlace(p.id, 'farm', spot[0], spot[1], [v])) return true;
         }

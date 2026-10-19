@@ -255,6 +255,9 @@ function teamColor(owner) {
     return owner >= 0 ? G.players[owner].color : '#7a5a3a';
 }
 
+const SAREE = ['#c2185b', '#e65100', '#2e7d32', '#f9a825', '#6a1b9a', '#00838f', '#ad1457', '#d84315'];
+const HAIR = '#1c1410';
+
 function person(u, t, opts) {
     const team = teamColor(u.owner);
     const walk = u.moving ? Math.sin(t * 11 + u.id) : 0;
@@ -262,20 +265,45 @@ function person(u, t, opts) {
     const atk = G.time - (u.attackAnim || -9) < 0.35 ? Math.sin((G.time - u.attackAnim) / 0.35 * Math.PI) : 0;
     const skin = SKIN[u.id % SKIN.length];
     const y0 = opts.y || 0;
-    if (!opts.mounted) {
-        prim('box', -0.07, y0 + 0.17, walk * 0.06, 0.09, 0.34, 0.1, opts.legs || '#e8e0d0', walk * 0.5);
-        prim('box', 0.07, y0 + 0.17, -walk * 0.06, 0.09, 0.34, 0.1, opts.legs || '#e8e0d0', -walk * 0.5);
-    }
+    const pp = u.person;
+    const female = pp && pp.female;
+    const age = pp ? ageOf(u) : 30;
+    const child = age < ADULT_AGE;
+    const elder = age >= ELDER_AGE;
     const by = y0 + (opts.mounted ? 0.05 : 0.34) + Math.abs(walk) * 0.015;
-    prim('box', 0, by + 0.17, 0, 0.27, 0.34, 0.17, opts.body || team);
-    prim('box', 0, by + 0.09, 0, 0.29, 0.06, 0.19, opts.belt || '#d8b26a');
-    prim('sphere', 0, by + 0.44, 0, 0.17, 0.19, 0.17, skin);
-    prim('sphere', 0, by + 0.52, -0.01, 0.2, 0.12, 0.2, opts.turban || team);
+    if (!opts.mounted) {
+        if (female) {
+            // A saree falls to the ground; the free end crosses the shoulder in the kingdom's colour.
+            prim('cone', 0, y0 + 0.25, 0, 0.36, 0.52, 0.3, opts.saree || SAREE[u.id % SAREE.length]);
+        } else {
+            prim('box', -0.07, y0 + 0.17, walk * 0.06, 0.09, 0.34, 0.1, opts.legs || '#e8e0d0', walk * 0.5);
+            prim('box', 0.07, y0 + 0.17, -walk * 0.06, 0.09, 0.34, 0.1, opts.legs || '#e8e0d0', -walk * 0.5);
+        }
+    }
+    const lean = elder ? 0.18 : 0;
+    prim('box', 0, by + 0.17, 0.02 * lean, female ? 0.24 : 0.27, 0.34, female ? 0.15 : 0.17, opts.body || (female ? opts.blouse || SAREE[(u.id + 3) % SAREE.length] : team), lean);
+    if (female) prim('box', 0, by + 0.2, 0.0, 0.07, 0.4, 0.2, opts.sash || team, 0, 0, 0.6);
+    else prim('box', 0, by + 0.09, 0, 0.29, 0.06, 0.19, opts.belt || '#d8b26a');
+    const hy = by + 0.44;
+    const hz = lean * 0.12;
+    prim('sphere', 0, hy, hz, 0.17, 0.19, 0.17, skin);
+    if (female) {
+        prim('sphere', 0, hy + 0.05, hz - 0.015, 0.18, 0.14, 0.18, elder ? '#c8c4bc' : HAIR);
+        prim('sphere', 0, hy + 0.02, hz - 0.11, 0.1, 0.1, 0.1, elder ? '#c8c4bc' : HAIR);
+        if (!child) prim('sphere', 0, hy + 0.03, hz + 0.085, 0.02, 0.02, 0.01, '#d01030');
+    } else if (child) {
+        prim('sphere', 0, hy + 0.05, hz - 0.01, 0.18, 0.12, 0.18, HAIR);
+    } else {
+        prim('sphere', 0, hy + 0.08, hz - 0.01, 0.2, 0.12, 0.2, opts.turban || (elder ? '#f2efe6' : team));
+        if (elder) prim('box', 0, hy - 0.08, hz + 0.07, 0.12, 0.1, 0.05, '#e8e4dc');
+        else if (u.id % 3 === 0) prim('box', 0, hy - 0.04, hz + 0.08, 0.1, 0.02, 0.02, HAIR);
+    }
     // Arms: the right arm swings with work or attack.
     const swing = work * 0.9 + atk * 1.6;
-    prim('box', -0.17, by + 0.18, 0, 0.07, 0.3, 0.08, skin, walk * -0.5);
-    prim('box', 0.17, by + 0.2, 0.04, 0.07, 0.3, 0.08, skin, -0.4 - swing);
-    return { by, swing, team };
+    prim('box', -0.15, by + 0.18, 0, 0.065, 0.3, 0.075, skin, walk * -0.5);
+    prim('box', 0.15, by + 0.2, 0.04, 0.065, 0.3, 0.075, skin, -0.4 - swing);
+    if (female && !child) for (const s of [-1, 1]) prim('box', s * 0.15, by + 0.08, s > 0 ? 0.08 : 0, 0.075, 0.03, 0.085, '#e0b43c');
+    return { by, swing, team, child, female, elder };
 }
 
 function unitModel(u, t) {
@@ -296,13 +324,16 @@ function unitModel(u, t) {
         else for (const s of [-1, 1]) prim('box', s * 0.06, h + 0.05, 0.42, 0.02, 0.02, 0.07, '#f0e8d8');
         return;
     }
-    frame(x, gy, z, u.facing);
+    frame(x, gy, z, u.facing, u.scale || 1);
     const team = teamColor(u.owner);
     switch (type) {
         case 'villager': {
-            const p = person(u, t, { body: '#e9dcc0', belt: team, turban: team });
-            const tool = u.task && u.task.res === 'wood' ? '#8a8a8a' : '#6a4a2a';
-            prim('box', 0.2, p.by + 0.1, 0.12, 0.03, 0.03, 0.42, tool, -0.6 - p.swing);
+            const p = person(u, t, { body: u.person && u.person.female ? undefined : '#e9dcc0', belt: team, turban: team });
+            if (!p.child || canWork(u)) {
+                const tool = u.task && u.task.res === 'wood' ? '#8a8a8a' : '#6a4a2a';
+                if (u.task || u.working) prim('box', 0.2, p.by + 0.1, 0.12, 0.03, 0.03, 0.42, tool, -0.6 - p.swing);
+                else if (p.female) prim('cyl', 0, p.by + 0.62, 0, 0.16, 0.1, 0.16, '#b8732a');
+            }
             if (u.carry && u.carry.amt > 1) prim('box', 0, p.by + 0.22, -0.15, 0.2, 0.18, 0.12, RES_COLOR[u.carry.res]);
             break;
         }
@@ -419,10 +450,80 @@ function buildingModel(b, t) {
             break;
         }
         case 'house': {
-            prim('box', 0, 0.42, 0, 1.4, 0.84, 1.2, b.id % 2 ? '#ece3d2' : '#d9a56a');
-            prim('cone4', 0, 1.1, 0, 1.7, 0.55, 1.45, '#a2502c');
-            prim('box', 0, 0.3, 0.61, 0.26, 0.5, 0.03, '#4a2c16');
-            prim('box', 0, 0.62, 0.66, 0.5, 0.05, 0.12, team);
+            if (hasTech(b.owner, 'pucca')) {
+                // Fired-brick house with a flat roof, parapet and a little upper room.
+                prim('box', 0, 0.5, 0, 1.5, 1.0, 1.3, '#a85a3c');
+                prim('box', 0, 1.02, 0, 1.58, 0.06, 1.38, '#d8c8a8');
+                for (const [ox, oz, sx, sz] of [[0, -0.66, 1.58, 0.06], [0, 0.66, 1.58, 0.06], [-0.76, 0, 0.06, 1.38], [0.76, 0, 0.06, 1.38]]) prim('box', ox, 1.12, oz, sx, 0.16, sz, '#d8c8a8');
+                prim('box', -0.35, 1.3, -0.25, 0.6, 0.5, 0.55, '#b86a48');
+                prim('box', 0, 0.34, 0.66, 0.3, 0.58, 0.03, '#4a2c16');
+                for (const sx of [-0.45, 0.45]) prim('box', sx, 0.6, 0.66, 0.2, 0.2, 0.03, '#2a1e14');
+                prim('box', 0, 0.72, 0.7, 0.6, 0.05, 0.14, team);
+            } else {
+                prim('box', 0, 0.42, 0, 1.4, 0.84, 1.2, b.id % 2 ? '#ece3d2' : '#d9a56a');
+                prim('cone4', 0, 1.1, 0, 1.7, 0.55, 1.45, '#a2502c');
+                prim('box', 0, 0.3, 0.61, 0.26, 0.5, 0.03, '#4a2c16');
+                prim('box', 0, 0.62, 0.66, 0.5, 0.05, 0.12, team);
+            }
+            break;
+        }
+        case 'well': {
+            prim('cyl', 0, 0.2, 0, 0.8, 0.4, 0.8, '#a89c8a');
+            prim('cyl', 0, 0.41, 0, 0.6, 0.02, 0.6, '#24506e');
+            for (const s of [-1, 1]) prim('box', s * 0.35, 0.7, 0, 0.06, 0.65, 0.06, '#6a4a2a');
+            prim('box', 0, 1.02, 0, 0.8, 0.06, 0.06, '#6a4a2a');
+            prim('cyl', 0, 0.85, 0, 0.12, 0.14, 0.12, '#b8732a');
+            break;
+        }
+        case 'shmashan': {
+            // Stone steps down to a burning ghat, with a small shrine and a peepal tree.
+            prim('box', 0, 0.06, 0, 1.9, 0.12, 1.9, '#8a847a');
+            prim('box', 0, 0.16, 0.1, 1.4, 0.1, 1.4, '#9a948a');
+            for (let k = 0; k < 4; k++) prim('box', -0.2 + (k % 2) * 0.4, 0.26 + Math.floor(k / 2) * 0.1, 0.1, 0.5, 0.08, 0.1, '#5a3a20', 0, k * 0.8, 0);
+            prim('box', 0.65, 0.45, -0.65, 0.4, 0.5, 0.4, '#d6a46a');
+            prim('cone4', 0.65, 0.85, -0.65, 0.45, 0.4, 0.45, '#b86a48');
+            prim('cyl', -0.65, 0.6, -0.65, 0.14, 1.0, 0.14, '#5a4030');
+            prim('sphere', -0.65, 1.3, -0.65, 0.9, 0.6, 0.9, '#3e6a2a');
+            if ((b.pyreUntil || 0) > G.time) {
+                const f = 1 + Math.sin(t * 12) * 0.15;
+                prim('glow', 0, 0.55, 0.1, 0.5 * f, 0.7 * f, 0.5 * f, '#ff8a20');
+                prim('glow', 0, 0.75, 0.1, 0.25, 0.45 * f, 0.25, '#ffd060');
+            }
+            break;
+        }
+        case 'market': {
+            const awn = ['#d9442b', '#f2b134', '#2a9d9a', '#8e44ad'];
+            for (let k = 0; k < 4; k++) {
+                const ox = (k % 2 ? 0.65 : -0.65);
+                const oz = (k < 2 ? -0.6 : 0.6);
+                prim('box', ox, 0.25, oz, 0.9, 0.5, 0.7, '#9a7a4a');
+                for (const [px, pz] of [[-0.4, -0.3], [0.4, -0.3], [-0.4, 0.3], [0.4, 0.3]]) prim('cyl', ox + px, 0.75, oz + pz, 0.05, 0.5, 0.05, '#6a4a2a');
+                prim('cone4', ox, 1.12, oz, 1.1, 0.3, 0.9, awn[k]);
+                prim('sphere', ox - 0.2, 0.56, oz + 0.2, 0.22, 0.14, 0.22, ['#e8a020', '#c2183a', '#7aa83a', '#e8dcc0'][k]);
+            }
+            prim('cyl', 0, 0.9, 0, 0.05, 1.8, 0.05, '#5a4a3a');
+            prim('box', 0.2, 1.65, 0, 0.4, 0.26, 0.02, team, 0, Math.sin(t * 2) * 0.2, 0);
+            break;
+        }
+        case 'gurukul': {
+            // Thatched huts around a shady banyan where the guru teaches.
+            for (const [ox, oz] of [[-0.9, -0.8], [0.9, -0.8], [-0.9, 0.85]]) {
+                prim('cyl', ox, 0.3, oz, 0.75, 0.6, 0.75, '#c99a6a');
+                prim('cone', ox, 0.85, oz, 1.0, 0.6, 1.0, '#a68a52');
+            }
+            prim('cyl', 0.5, 0.6, 0.5, 0.3, 1.2, 0.3, '#5a4030');
+            prim('sphere', 0.5, 1.45, 0.5, 1.5, 0.8, 1.5, '#3e6a2a');
+            prim('box', 0.5, 0.12, 0.5, 1.2, 0.08, 1.2, '#b8a48a');
+            prim('box', -0.2, 0.2, 0.3, 0.5, 0.06, 0.3, team);
+            break;
+        }
+        case 'panchayat': {
+            // The village council meets on a raised platform under a great peepal tree.
+            prim('box', 0, 0.15, 0, 1.8, 0.3, 1.8, '#b8a48a');
+            prim('box', 0, 0.33, 0, 1.5, 0.06, 1.5, '#cdb894');
+            prim('cyl', 0, 0.9, 0, 0.32, 1.2, 0.32, '#5a4030');
+            prim('sphere', 0, 1.75, 0, 1.9, 1.0, 1.9, '#4a7a30');
+            for (let k = 0; k < 4; k++) prim('box', Math.cos(k * 1.57) * 0.6, 0.45, Math.sin(k * 1.57) * 0.6, 0.35, 0.12, 0.2, team, 0, k * 1.57, 0);
             break;
         }
         case 'farm': {
@@ -512,6 +613,42 @@ function buildingModel(b, t) {
     return gy;
 }
 
+// Festival decorations and wedding garlands on homes.
+const HOLI = ['#ff2f7a', '#ffd400', '#21c46b', '#2f8bff', '#ff7a1a', '#b03cff'];
+
+function decorate(b, gy, t) {
+    if (b.owner < 0) return;
+    const fest = player(b.owner).festival;
+    const home = b.type === 'house' || b.type === 'tc';
+    const n = b.def.size;
+    if ((b.celebrateUntil || 0) > G.time && home) {
+        frame(b.x, gy, b.y, 0);
+        for (let k = 0; k < 9; k++) prim('sphere', -0.6 + k * 0.15, 0.95 - Math.sin(k / 8 * Math.PI) * 0.15, n * 0.33 + 0.05, 0.09, 0.09, 0.09, k % 2 ? '#ff9a10' : '#ffd400');
+    }
+    if (!fest || !home) return;
+    frame(b.x, gy, b.y, 0);
+    const front = n * 0.42 + 0.15;
+    if (fest.kind === 'lights') {
+        for (let k = 0; k < 6; k++) {
+            const f = 0.8 + Math.sin(t * 7 + k * 1.7 + b.id) * 0.2;
+            prim('glow', -n * 0.4 + k * n * 0.16, 0.08, front, 0.1 * f, 0.14 * f, 0.1 * f, '#ffc040');
+        }
+    } else if (fest.kind === 'colours') {
+        for (let k = 0; k < 5; k++) {
+            const ph = (t * 0.6 + k * 0.37 + b.id * 0.13) % 1;
+            prim('glow', Math.sin(k * 2.1 + b.id) * n * 0.5, 0.3 + ph * 1.2, front + Math.cos(k * 1.3) * 0.3, 0.25 + ph * 0.4, 0.25 + ph * 0.4, 0.25 + ph * 0.4, HOLI[(k + b.id) % HOLI.length]);
+        }
+    } else if (fest.kind === 'flowers') {
+        prim('cyl', 0, 0.03, front + 0.25, 0.7, 0.03, 0.7, '#ffb000');
+        prim('cyl', 0, 0.05, front + 0.25, 0.45, 0.03, 0.45, '#e8441a');
+        prim('cyl', 0, 0.07, front + 0.25, 0.2, 0.03, 0.2, '#f8f0e0');
+    } else if (fest.kind === 'harvest') {
+        prim('sphere', n * 0.3, 0.15, front, 0.28, 0.3, 0.28, '#b8732a');
+        prim('glow', n * 0.3, 0.32, front, 0.18, 0.12, 0.18, '#f8f0e0');
+        for (const s of [-1, 1]) prim('cyl', -n * 0.3 + s * 0.1, 0.4, front, 0.04, 0.8, 0.04, '#5a8a2a', 0, 0, s * 0.15);
+    }
+}
+
 function projectileModel(p) {
     const tx = p.target.x;
     const tz = p.target.y;
@@ -542,7 +679,7 @@ function renderFrame(now) {
     for (const e of G.ents.values()) {
         if (e.x < view.x0 || e.x > view.x1 || e.y < view.z0 || e.y > view.z1) continue;
         if (!seenByHuman(e)) continue;
-        if (e.kind === 'building') buildingModel(e, t);
+        if (e.kind === 'building') { const gy = buildingModel(e, t); if (e.built) decorate(e, gy, t); }
         else if (e.kind === 'unit') {
             if (e.dead) {
                 if (G.time - e.deadAt > 3) continue;
@@ -630,6 +767,42 @@ function drawOverlay() {
             octx.fillRect(s.x - w / 2, s.y + 5, w * e.progress, 3);
         }
     }
+    // Floating words: delivered loads, births, skills learned.
+    octx.textAlign = 'center';
+    octx.font = '600 13px Hind, system-ui, sans-serif';
+    for (const f of G.floats || []) {
+        const age = G.time - f.t;
+        if (age > 2.4) continue;
+        const s = toScreen(f.x, surfaceAt(f.x, f.y) + 1.3 + age * 0.45, f.y);
+        if (s.behind) continue;
+        octx.globalAlpha = Math.min(1, (2.4 - age) * 1.5);
+        octx.lineWidth = 3;
+        octx.strokeStyle = 'rgba(20,12,24,.85)';
+        octx.strokeText(f.text, s.x, s.y);
+        octx.fillStyle = f.color;
+        octx.fillText(f.text, s.x, s.y);
+    }
+    octx.globalAlpha = 1;
+    // Name tags for the selected person and whatever is under the cursor.
+    const tagged = new Set();
+    if (UI.selected.length <= 12) for (const e of UI.selected) tagged.add(e);
+    if (UI.hover && UI.hover.ent) tagged.add(UI.hover.ent);
+    for (const e of tagged) {
+        if (e.dead || !seenByHuman(e)) continue;
+        const label = entLabel(e);
+        if (!label) continue;
+        const h = e.kind === 'building' ? (e.type === 'tower' ? 3.4 : 2.4) : e.type === 'elephant' ? 2.1 : e.def.cls === 'cavalry' ? 1.7 : 1.15 * (e.scale || 1);
+        const s = toScreen(e.x, surfaceAt(e.x, e.y) + h, e.y);
+        if (s.behind) continue;
+        octx.font = '600 12px Hind, system-ui, sans-serif';
+        const w = octx.measureText(label.text).width + 14;
+        const y = s.y - 16;
+        octx.fillStyle = 'rgba(20,12,24,.82)';
+        roundRect(octx, s.x - w / 2, y - 11, w, 18, 9);
+        octx.fill();
+        octx.fillStyle = label.color;
+        octx.fillText(label.text, s.x, y + 2);
+    }
     if (UI.drag && UI.drag.box) {
         const d = UI.drag;
         octx.strokeStyle = '#d8ffd0';
@@ -640,6 +813,115 @@ function drawOverlay() {
         octx.fillRect(x, y, Math.abs(d.x1 - d.x0), Math.abs(d.y1 - d.y0));
         octx.strokeRect(x, y, Math.abs(d.x1 - d.x0), Math.abs(d.y1 - d.y0));
     }
+}
+
+function roundRect(g, x, y, w, h, r) {
+    g.beginPath();
+    g.moveTo(x + r, y);
+    g.arcTo(x + w, y, x + w, y + h, r);
+    g.arcTo(x + w, y + h, x, y + h, r);
+    g.arcTo(x, y + h, x, y, r);
+    g.arcTo(x, y, x + w, y, r);
+    g.closePath();
+}
+
+function entLabel(e) {
+    const color = e.owner === G.human ? '#f6ead2' : e.owner < 0 ? '#ffe9a8' : '#ffb4a8';
+    if (e.person) {
+        const pl = player(e.owner);
+        let t = e.person.name;
+        if (pl.mukhiya === e.id) t = `Mukhiya ${t}`;
+        else if (e.def.cls !== 'villager') t = `${RANKS[rankOf(e)][1]} ${t}`;
+        return { text: `${t}, ${Math.floor(ageOf(e))}`, color };
+    }
+    if (e.kind === 'unit' || e.kind === 'building') return { text: e.def.name, color };
+    if (e.kind === 'carcass') return { text: `${Math.floor(e.food)} food`, color };
+    return null;
+}
+
+// ---------- Portraits: every unit and building drawn once from the 3D models ----------
+
+const PORTRAIT = {};
+
+function makePortraits() {
+    const size = 112;
+    const rt = new THREE.WebGLRenderTarget(size, size);
+    rt.texture.encoding = THREE.sRGBEncoding;
+    const cam = new THREE.PerspectiveCamera(30, 1, 0.1, 60);
+    const hidden = [];
+    for (const c of worldGroup.children) if (!Object.values(BATCH).includes(c) && c.visible) { c.visible = false; hidden.push(c); }
+    const vegWas = vegGroup.visible;
+    vegGroup.visible = false;
+    const bg = scene.background;
+    scene.background = null;
+    fogUniforms.fogOn.value = 0;
+    const sunPos = sunLight.position.clone();
+    const sunTarget = sunLight.target.position.clone();
+    const pixels = new Uint8Array(size * size * 4);
+    const c2 = document.createElement('canvas');
+    c2.width = c2.height = size;
+    const g2 = c2.getContext('2d');
+    const shoot = (key, draw, height, dist) => {
+        beginBatches();
+        const gy = draw();
+        endBatches();
+        cam.position.set(dist * 0.55, gy + height * 0.62 + dist * 0.42, dist);
+        cam.lookAt(0, gy + height * 0.45, 0);
+        sunLight.position.set(-4, gy + 8, 6);
+        sunLight.target.position.set(0, gy, 0);
+        sunLight.target.updateMatrixWorld();
+        renderer.setRenderTarget(rt);
+        renderer.setClearColor(0x000000, 0);
+        renderer.clear();
+        renderer.render(scene, cam);
+        renderer.readRenderTargetPixels(rt, 0, 0, size, size, pixels);
+        const img = g2.createImageData(size, size);
+        for (let y = 0; y < size; y++) img.data.set(pixels.subarray((size - 1 - y) * size * 4, (size - y) * size * 4), y * size * 4);
+        g2.clearRect(0, 0, size, size);
+        g2.putImageData(img, 0, 0);
+        PORTRAIT[key] = c2.toDataURL();
+    };
+    const unit = (type, person) => {
+        const u = { id: 11, type, def: UNIT_TYPES[type], owner: G.human, x: 0, y: 0, facing: 0.45, moving: false, path: [], radius: 0.3, scale: 1 };
+        if (person) {
+            u.person = { female: person.female, born: G.time - person.age * YEAR, skills: {}, kills: 0 };
+            u.scale = person.age < ADULT_AGE ? 0.5 + 0.5 * person.age / ADULT_AGE : 1;
+        }
+        return u;
+    };
+    const ppl = { villager_m: { female: false, age: 28 }, villager_f: { female: true, age: 26 }, child_m: { female: false, age: 7 }, child_f: { female: true, age: 7 }, elder_m: { female: false, age: 66 }, elder_f: { female: true, age: 64 } };
+    for (const [key, pp] of Object.entries(ppl)) shoot(key, () => { const u = unit('villager', pp); unitModel(u, 0); return surfaceAt(0, 0); }, pp.age < 14 ? 0.8 : 1.1, pp.age < 14 ? 1.05 : 1.4);
+    for (const type of Object.keys(UNIT_TYPES)) {
+        if (type === 'villager') continue;
+        const d = UNIT_TYPES[type];
+        const big = type === 'elephant' ? 2.2 : d.cls === 'cavalry' ? 1.7 : d.cls === 'siege' ? 1.3 : d.cls === 'animal' ? 0.7 : 1.15;
+        shoot(type, () => { const u = unit(type, d.cls === 'animal' || d.cls === 'siege' ? null : { female: false, age: 26 }); unitModel(u, 0); return surfaceAt(0, 0); }, big, big * 1.45);
+    }
+    for (const type of Object.keys(BUILDING_TYPES)) {
+        const d = BUILDING_TYPES[type];
+        const n = d.size;
+        shoot(type, () => buildingModel({ id: 5, type, def: d, owner: G.human, x: 0, y: 0, tx: 0, ty: 0, built: true, progress: 1, queue: [], food: d.food || 0, hp: 1, maxHp: 1 }, 0), type === 'tower' ? 3.2 : n * 0.9, n * 1.6 + 1.6);
+    }
+    renderer.setRenderTarget(null);
+    rt.dispose();
+    for (const c of hidden) c.visible = true;
+    vegGroup.visible = vegWas;
+    scene.background = bg;
+    fogUniforms.fogOn.value = 1;
+    sunLight.position.copy(sunPos);
+    sunLight.target.position.copy(sunTarget);
+    sunLight.target.updateMatrixWorld();
+}
+
+function portraitFor(e) {
+    if (e.kind === 'building') return PORTRAIT[e.type];
+    if (e.kind === 'carcass') return PORTRAIT[e.type];
+    if (e.type === 'villager' && e.person) {
+        const a = ageOf(e);
+        const stage = a < ADULT_AGE ? 'child' : a >= ELDER_AGE ? 'elder' : 'villager';
+        return PORTRAIT[`${stage}_${e.person.female ? 'f' : 'm'}`];
+    }
+    return PORTRAIT[e.type];
 }
 
 // ---------- Picking ----------

@@ -52,7 +52,9 @@ function beginGame() {
     UI.panelKey = '';
     $('messages').innerHTML = '';
     buildWorldScene();
+    makePortraits();
     buildMiniBase();
+    closePeople();
     const [sx, sy] = player(G.human).start;
     camDist = viewW / viewH < 0.8 ? 32 : 22;
     lookAt(sx, sy + 1);
