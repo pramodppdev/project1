@@ -314,6 +314,10 @@ function renderTop() {
     $('clock').textContent = `Year ${year} · ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
     $('idle-n').textContent = idleVillagers().length;
     $('btn-pause').innerHTML = `${icon(UI.paused ? 'play' : 'pause', 16)}<span>${UI.paused ? 'Resume' : 'Pause'}</span>`;
+    // Keep messages and banners just below the top bar, however many lines it wraps to.
+    const below = $('topbar').offsetHeight;
+    $('messages').style.top = `${below + 10}px`;
+    $('festival').style.top = `${below + 8}px`;
     const f = p.festival;
     const fb = $('festival');
     if (f) {
